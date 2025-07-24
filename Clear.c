@@ -1,8 +1,10 @@
-// runClear.C
+// runClearAndPscan.C
 #include <TSystem.h>
 #include <TString.h>
 #include <TSystemDirectory.h>
+#include <TSystemFile.h>
 #include <TList.h>
+#include <TInterpreter.h>
 #include <iostream>
 #include <vector>
 
@@ -16,11 +18,17 @@ void Clear() {
     }
 
     std::vector<TString> dirNames;
-    TSystemFile *file;
     TIter next(files);
-    while ((file = (TSystemFile*)next())) {
+    TSystemFile *file;
+    TObject *obj;
+    while ((obj = next())) {
+        file = dynamic_cast<TSystemFile*>(obj);
+        if (!file) continue;
+        
         TString name = file->GetName();
-        if (file->IsDirectory() && name != "." && name != ".." && !name.BeginsWith(".")) {
+        if (name == "." || name == ".." || name.BeginsWith(".")) continue;
+
+        if (file->IsDirectory()) {
             dirNames.push_back(name);
         }
     }
@@ -32,30 +40,79 @@ void Clear() {
     }
 
     // Sprawdź dostępność programów
-    bool useExecutable = !gSystem->AccessPathName("CheckTrimFiles");
-    bool useSource = !gSystem->AccessPathName("CheckTrimFiles.c");
+    bool useExecutableTrim = (gSystem->AccessPathName("CheckTrimFiles") == 0);
+    bool useSourceTrim = (gSystem->AccessPathName("CheckTrimFiles.c") == 0);
+    bool trimAvailable = useExecutableTrim || useSourceTrim;
+
+    bool useExecutablePscan = (gSystem->AccessPathName("CheckPscanFiles") == 0);
+    bool useSourcePscan = (gSystem->AccessPathName("CheckPscanFiles.c") == 0);
+    bool pscanAvailable = useExecutablePscan || useSourcePscan;
     
-    if (!useExecutable && !useSource) {
-        std::cerr << "Error: No CheckTrimFiles executable or source found!" << std::endl;
+    // DODANE: Sprawdzenie dostępności CheckConnFiles
+    bool useExecutableConn = (gSystem->AccessPathName("CheckConnFiles") == 0);
+    bool useSourceConn = (gSystem->AccessPathName("CheckConnFiles.c") == 0);
+    bool connAvailable = useExecutableConn || useSourceConn;
+
+    // Aktualizacja warunku błędów
+    if (!trimAvailable && !pscanAvailable && !connAvailable) {
+        std::cerr << "Error: No valid programs found!" << std::endl;
         return;
     }
 
-    // Uruchom program dla każdego folderu
+    // Uruchom programy dla każdego folderu
     for (auto& dir : dirNames) {
-        TString command;
-        
-        if (useExecutable) {
-            command = TString::Format("./CheckTrimFiles \"%s\"", dir.Data());
-        } else {
-            // Dynamiczna kompilacja i uruchomienie
-            command = TString::Format(".x CheckTrimFiles.c+(\"%s\")", dir.Data());
+        // 1. Uruchom CheckTrimFiles
+        if (trimAvailable) {
+            TString trimCommand;
+            
+            if (useExecutableTrim) {
+                trimCommand = TString::Format("./CheckTrimFiles \"%s\"", dir.Data());
+            } else {
+                trimCommand = TString::Format(".x CheckTrimFiles.c+(\"%s\")", dir.Data());
+            }
+
+            std::cout << "\n[1/3] Executing CheckTrimFiles: " << trimCommand << std::endl;
+            int trimStatus = gInterpreter->ProcessLine(trimCommand);
+            
+            if (trimStatus != 0) {
+                std::cerr << "Error processing directory with CheckTrimFiles: " << dir << std::endl;
+            }
         }
 
-        std::cout << "Executing: " << command << std::endl;
-        int status = gROOT->ProcessLine(command);
+        // 2. Uruchom CheckPscanFiles
+        if (pscanAvailable) {
+            TString pscanCommand;
+            
+            if (useExecutablePscan) {
+                pscanCommand = TString::Format("./CheckPscanFiles \"%s\"", dir.Data());
+            } else {
+                pscanCommand = TString::Format(".x CheckPscanFiles.c+(\"%s\")", dir.Data());
+            }
+
+            std::cout << "[2/3] Executing CheckPscanFiles: " << pscanCommand << std::endl;
+            int pscanStatus = gInterpreter->ProcessLine(pscanCommand);
+            
+            if (pscanStatus != 0) {
+                std::cerr << "Error processing directory with CheckPscanFiles: " << dir << std::endl;
+            }
+        }
         
-        if (status != 0) {
-            std::cerr << "Error processing directory: " << dir << std::endl;
+        // DODANE: 3. Uruchom CheckConnFiles
+        if (connAvailable) {
+            TString connCommand;
+            
+            if (useExecutableConn) {
+                connCommand = TString::Format("./CheckConnFiles \"%s\"", dir.Data());
+            } else {
+                connCommand = TString::Format(".x CheckConnFiles.c+(\"%s\")", dir.Data());
+            }
+
+            std::cout << "[3/3] Executing CheckConnFiles: " << connCommand << std::endl;
+            int connStatus = gInterpreter->ProcessLine(connCommand);
+            
+            if (connStatus != 0) {
+                std::cerr << "Error processing directory with CheckConnFiles: " << dir << std::endl;
+            }
         }
     }
 }
