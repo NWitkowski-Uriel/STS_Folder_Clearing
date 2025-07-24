@@ -4,116 +4,106 @@
 #include "TSystemDirectory.h"
 
 // Define flag constants using bitmask
-#define FLAG_FOLDER_MISSING          0x01  // Target directory not found
-#define FLAG_CONN_FOLDER_MISSING     0x02  // conn_check_files directory missing
-#define FLAG_DIR_ACCESS_ERROR        0x04  // Error accessing directory
-#define FLAG_ELECTRON_COUNT          0x08  // Incorrect electron file count
-#define FLAG_HOLE_COUNT              0x10  // Incorrect hole file count
-#define FLAG_FILE_OPEN_ERROR         0x20  // File opening error
+#define FLAG_CONN_FOLDER_MISSING     0x01  // conn_check_files directory missing
+#define FLAG_DIR_ACCESS_ERROR        0x02  // Error accessing directory
+#define FLAG_ELECTRON_COUNT          0x04  // Incorrect electron file count
+#define FLAG_HOLE_COUNT              0x08  // Incorrect hole file count
+#define FLAG_FILE_OPEN_ERROR         0x10  // File opening error
 
 int CheckConnFiles(const char* targetDir) {
-    int resultFlags = 0;  // Initialize flag container
+    int resultFlags = 0;  // Initialize flag container (bitmask)
 
     // Get current working directory
     TString currentDir = gSystem->pwd();
     
-    // Construct full path to target directory
+    // Construct full path to target directory (assumed to exist)
     TString fullTargetPath = TString::Format("%s/%s", currentDir.Data(), targetDir);
     
     // Construct full path to conn_check_files directory
     TString connDirPath = TString::Format("%s/%s/conn_check_files", currentDir.Data(), targetDir);
 
-    // Verify target directory exists
-    if (gSystem->AccessPathName(fullTargetPath, kFileExists)) {
-        std::cerr << "\n===== CRITICAL ERROR =====" << std::endl;
-        std::cerr << "Target directory '" << targetDir << "' does not exist!" << std::endl;
-        std::cerr << "Current location: " << currentDir << std::endl;
-        std::cerr << "Expected path:    " << fullTargetPath << std::endl;
-        
-        std::cout << "\n===== Final Flags Status =====" << std::endl;
-        std::cout << "FLAG 0 (Folder exists):  1" << std::endl;
-        std::cout << "FLAG 1 (Electron count): 1" << std::endl;
-        std::cout << "FLAG 2 (Hole count):     1" << std::endl;
-        std::cout << "\nSummary: [TARGET FOLDER MISSING]" << std::endl;
-        
-        resultFlags |= FLAG_FOLDER_MISSING;  // Set missing directory flag
-        return resultFlags;  // Return immediately with flags
-    }
-    
-    // Verify conn_check_files directory exists
+    // PRIMARY CHECK: Verify existence of 'conn_check_files' directory
     if (gSystem->AccessPathName(connDirPath, kFileExists)) {
         std::cerr << "\n===== CRITICAL ERROR =====" << std::endl;
         std::cerr << "Directory 'conn_check_files' does not exist!" << std::endl;
         std::cerr << "Target folder: " << fullTargetPath << std::endl;
         std::cerr << "Expected path: " << connDirPath << std::endl;
         
+        // Report status flags (human-readable format)
         std::cout << "\n===== Final Flags Status =====" << std::endl;
-        std::cout << "FLAG 0 (Folder exists):  1" << std::endl;
-        std::cout << "FLAG 1 (Electron count): 1" << std::endl;
-        std::cout << "FLAG 2 (Hole count):     1" << std::endl;
+        std::cout << "FLAG 0 (Conn folder exists): 1" << std::endl;
+        std::cout << "FLAG 1 (Electron count):     1" << std::endl;
+        std::cout << "FLAG 2 (Hole count):         1" << std::endl;
         std::cout << "\nSummary: [CONN_CHECK_FILES FOLDER MISSING]" << std::endl;
         
-        resultFlags |= FLAG_CONN_FOLDER_MISSING;  // Set missing conn_check_files flag
-        return resultFlags;  // Return immediately with flags
+        // Set flag and return immediately
+        resultFlags |= FLAG_CONN_FOLDER_MISSING;
+        return resultFlags;
     }
 
-    // Access conn_check_files directory contents
+    // Attempt to access directory contents
     TSystemDirectory connDir("conn_check_files", connDirPath);
     TList* files = connDir.GetListOfFiles();
     
+    // Handle directory access failure
     if (!files) {
         std::cerr << "Error: Could not read directory contents: " << connDirPath << std::endl;
         
+        // Report status flags
         std::cout << "\n===== Final Flags Status =====" << std::endl;
-        std::cout << "FLAG 0 (Folder access):  1" << std::endl;
-        std::cout << "FLAG 1 (Electron count): 1" << std::endl;
-        std::cout << "FLAG 2 (Hole count):     1" << std::endl;
+        std::cout << "FLAG 0 (Directory access):  1" << std::endl;
+        std::cout << "FLAG 1 (Electron count):    1" << std::endl;
+        std::cout << "FLAG 2 (Hole count):        1" << std::endl;
         std::cout << "\nSummary: [DIRECTORY ACCESS ERROR]" << std::endl;
         
-        resultFlags |= FLAG_DIR_ACCESS_ERROR;  // Set directory access flag
-        return resultFlags;  // Return immediately with flags
+        resultFlags |= FLAG_DIR_ACCESS_ERROR;
+        return resultFlags;
     }
 
-    int electronCount = 0;   // Counter for electron files
-    int holeCount = 0;       // Counter for hole files
-    bool openErrors = false; // Track file opening issues
+    // Initialize counters for validation
+    int electronCount = 0;   // Tracks electron-related files
+    int holeCount = 0;       // Tracks hole-related files
+    bool openErrors = false; // Flags file access issues
 
-    // Iterate through all files in directory
+    // Iterate through all directory entries
     TSystemFile* file;
     TIter next(files);
     while ((file = (TSystemFile*)next())) {
         TString fileName = file->GetName();
         
-        // Skip directories and special files (. and ..)
+        // Skip directories and special files (., ..)
         if (file->IsDirectory() || fileName == "." || fileName == "..") continue;
         
-        // Process electron files (ending with '_elect.txt')
+        // Construct full file path
+        TString filePath = TString::Format("%s/%s", connDirPath.Data(), fileName.Data());
+
+        // Process electron files (expected suffix: '_elect.txt')
         if (fileName.EndsWith("_elect.txt")) {
             electronCount++;
-            TString filePath = TString::Format("%s/%s", connDirPath.Data(), fileName.Data());
+            // Verify file accessibility
             std::ifstream f_test(filePath.Data());
             if (!f_test.is_open()) {
                 std::cerr << "Error: Cannot open electron file: " << filePath << std::endl;
                 openErrors = true;
             } else {
-                f_test.close();
+                f_test.close();  // Properly close accessible files
             }
         }
-        // Process hole files (ending with '_holes.txt')
+        // Process hole files (expected suffix: '_holes.txt')
         else if (fileName.EndsWith("_holes.txt")) {
             holeCount++;
-            TString filePath = TString::Format("%s/%s", connDirPath.Data(), fileName.Data());
+            // Verify file accessibility
             std::ifstream f_test(filePath.Data());
             if (!f_test.is_open()) {
                 std::cerr << "Error: Cannot open hole file: " << filePath << std::endl;
                 openErrors = true;
             } else {
-                f_test.close();
+                f_test.close();  // Properly close accessible files
             }
         }
     }
 
-    // Calculate validation flags based on file counts
+    // Validate file counts against expected quantity (8 each)
     bool flag_electron_count = (electronCount != 8);
     bool flag_hole_count = (holeCount != 8);
 
@@ -122,28 +112,31 @@ int CheckConnFiles(const char* targetDir) {
     if (flag_hole_count) resultFlags |= FLAG_HOLE_COUNT;
     if (openErrors) resultFlags |= FLAG_FILE_OPEN_ERROR;
 
-    // Generate validation report
+    // Generate comprehensive validation report
     std::cout << "\n===== Validation Report =====" << std::endl;
-    std::cout << "Current location:      " << currentDir << std::endl;
-    std::cout << "Target directory:      " << targetDir << std::endl;
-    std::cout << "Full target path:      " << fullTargetPath << std::endl;
-    std::cout << "Conn check location:   " << connDirPath << std::endl;
-    std::cout << "Folder status:         EXISTS | FLAG 0: OK" << std::endl;
+    std::cout << "Current location:        " << currentDir << std::endl;
+    std::cout << "Target directory:        " << targetDir << std::endl;
+    std::cout << "Full target path:        " << fullTargetPath << std::endl;
+    std::cout << "Connection check location: " << connDirPath << std::endl;
+    
+    // Report file counts and validation status
     std::cout << "Electron files: " << electronCount << "/8 | "
-              << "FLAG 1: " << (flag_electron_count ? "TRIGGERED" : "OK") 
-              << (electronCount < 8 ? " (MISSING)" : (electronCount > 8 ? " (EXTRA)" : "")) << std::endl;
+              << "Status: " << (flag_electron_count ? "FAIL" : "OK") 
+              << (electronCount < 8 ? " (UNDER)" : (electronCount > 8 ? " (OVER)" : "")) << std::endl;
               
     std::cout << "Hole files:     " << holeCount << "/8 | "
-              << "FLAG 2: " << (flag_hole_count ? "TRIGGERED" : "OK")
-              << (holeCount < 8 ? " (MISSING)" : (holeCount > 8 ? " (EXTRA)" : "")) << std::endl;
+              << "Status: " << (flag_hole_count ? "FAIL" : "OK")
+              << (holeCount < 8 ? " (UNDER)" : (holeCount > 8 ? " (OVER)" : "")) << std::endl;
               
-    std::cout << "File access:    " << (openErrors ? "ERRORS" : "OK") << std::endl;
+    std::cout << "File accessibility: " << (openErrors ? "ERRORS DETECTED" : "ALL FILES ACCESSIBLE") << std::endl;
               
-    std::cout << "\n===== Final Flags Status =====" << std::endl;
-    std::cout << "FLAG 0 (Folder exists):  " << 0 << std::endl;
-    std::cout << "FLAG 1 (Electron count): " << flag_electron_count << std::endl;
-    std::cout << "FLAG 2 (Hole count):     " << flag_hole_count << std::endl;
+    // Report flag status (bitmask interpretation)
+    std::cout << "\n===== Final Flags Status (Bitmask) =====" << std::endl;
+    std::cout << "FLAG 0 (Electron count): " << flag_electron_count << std::endl;
+    std::cout << "FLAG 1 (Hole count):     " << flag_hole_count << std::endl;
+    std::cout << "FLAG 2 (File access):    " << openErrors << std::endl;
     
+    // Generate summary of issues
     std::cout << "\nSummary: ";
     if (!flag_electron_count && !flag_hole_count && !openErrors) {
         std::cout << "ALL CHECKS PASSED";
