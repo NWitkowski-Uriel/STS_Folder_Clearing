@@ -3,17 +3,27 @@
 #include "TSystem.h"
 #include "TSystemDirectory.h"
 
-void CheckTrimFiles(const char* targetDir) {
-    // Pobierz bieżącą ścieżkę roboczą
+// Define flag constants using bitmask
+#define FLAG_FOLDER_MISSING       0x01  // Target directory not found
+#define FLAG_TRIM_FOLDER_MISSING  0x02  // trim_files directory missing
+#define FLAG_DIR_ACCESS_ERROR     0x04  // Error accessing directory
+#define FLAG_ELECTRON_COUNT       0x08  // Incorrect electron file count
+#define FLAG_HOLE_COUNT           0x10  // Incorrect hole file count
+#define FLAG_FILE_OPEN_ERROR      0x20  // File opening error
+
+int CheckTrimFiles(const char* targetDir) {
+    int resultFlags = 0;  // Initialize flag container
+
+    // Get current working directory
     TString currentDir = gSystem->pwd();
     
-    // Utwórz pełną ścieżkę do folderu docelowego
+    // Construct full path to target directory
     TString fullTargetPath = TString::Format("%s/%s", currentDir.Data(), targetDir);
     
-    // Utwórz pełną ścieżkę do folderu trim_files
+    // Construct full path to trim_files directory
     TString trimDirPath = TString::Format("%s/%s/trim_files", currentDir.Data(), targetDir);
 
-    // Sprawdź czy folder docelowy istnieje w bieżącej lokalizacji
+    // Check if target directory exists
     if (gSystem->AccessPathName(fullTargetPath, kFileExists)) {
         std::cerr << "\n===== CRITICAL ERROR =====" << std::endl;
         std::cerr << "Target directory '" << targetDir << "' does not exist in current location!" << std::endl;
@@ -25,10 +35,12 @@ void CheckTrimFiles(const char* targetDir) {
         std::cout << "FLAG 1 (Electron count): 1" << std::endl;
         std::cout << "FLAG 2 (Hole count):     1" << std::endl;
         std::cout << "\nSummary: [TARGET FOLDER MISSING]" << std::endl;
-        return;
+        
+        resultFlags |= FLAG_FOLDER_MISSING;  // Set missing directory flag
+        return resultFlags;  // Return immediately with flags
     }
     
-    // Sprawdź czy folder trim_files istnieje
+    // Check if trim_files directory exists
     if (gSystem->AccessPathName(trimDirPath, kFileExists)) {
         std::cerr << "\n===== CRITICAL ERROR =====" << std::endl;
         std::cerr << "Directory 'trim_files' does not exist in target folder!" << std::endl;
@@ -40,9 +52,12 @@ void CheckTrimFiles(const char* targetDir) {
         std::cout << "FLAG 1 (Electron count): 1" << std::endl;
         std::cout << "FLAG 2 (Hole count):     1" << std::endl;
         std::cout << "\nSummary: [TRIM_FILES FOLDER MISSING]" << std::endl;
-        return;
+        
+        resultFlags |= FLAG_TRIM_FOLDER_MISSING;  // Set missing trim_files flag
+        return resultFlags;  // Return immediately with flags
     }
 
+    // Access trim_files directory contents
     TSystemDirectory trimDir("trim_files", trimDirPath);
     TList* files = trimDir.GetListOfFiles();
     
@@ -54,22 +69,25 @@ void CheckTrimFiles(const char* targetDir) {
         std::cout << "FLAG 1 (Electron count): 1" << std::endl;
         std::cout << "FLAG 2 (Hole count):     1" << std::endl;
         std::cout << "\nSummary: [DIRECTORY ACCESS ERROR]" << std::endl;
-        return;
+        
+        resultFlags |= FLAG_DIR_ACCESS_ERROR;  // Set directory access flag
+        return resultFlags;  // Return immediately with flags
     }
 
-    int electronCount = 0;
-    int holeCount = 0;
-    bool openErrors = false;
+    int electronCount = 0;     // Counter for electron files
+    int holeCount = 0;         // Counter for hole files
+    bool openErrors = false;   // Track file opening issues
 
+    // Iterate through all files in directory
     TSystemFile* file;
     TIter next(files);
     while ((file = (TSystemFile*)next())) {
         TString fileName = file->GetName();
         
-        // Ignore directories and special files
+        // Skip directories and special files (. and ..)
         if (file->IsDirectory() || fileName == "." || fileName == "..") continue;
         
-        // Check electron files
+        // Process electron files (ending with '_elect.txt')
         if (fileName.EndsWith("_elect.txt")) {
             electronCount++;
             TString filePath = TString::Format("%s/%s", trimDirPath.Data(), fileName.Data());
@@ -81,7 +99,7 @@ void CheckTrimFiles(const char* targetDir) {
                 f_test.close();
             }
         }
-        // Check hole files
+        // Process hole files (ending with '_holes.txt')
         else if (fileName.EndsWith("_holes.txt")) {
             holeCount++;
             TString filePath = TString::Format("%s/%s", trimDirPath.Data(), fileName.Data());
@@ -95,12 +113,16 @@ void CheckTrimFiles(const char* targetDir) {
         }
     }
 
-    // Calculate flags
+    // Calculate validation flags based on file counts
     bool flag_electron_count = (electronCount != 8);
     bool flag_hole_count = (holeCount != 8);
-    bool flag_open_errors = openErrors;
 
-    // Generate final report with flags
+    // Update result flags based on validation
+    if (flag_electron_count) resultFlags |= FLAG_ELECTRON_COUNT;
+    if (flag_hole_count) resultFlags |= FLAG_HOLE_COUNT;
+    if (openErrors) resultFlags |= FLAG_FILE_OPEN_ERROR;
+
+    // Generate validation report
     std::cout << "\n===== Validation Report =====" << std::endl;
     std::cout << "Current location:      " << currentDir << std::endl;
     std::cout << "Target directory:      " << targetDir << std::endl;
@@ -123,12 +145,14 @@ void CheckTrimFiles(const char* targetDir) {
     std::cout << "FLAG 2 (Hole count):     " << flag_hole_count << std::endl;
     
     std::cout << "\nSummary: ";
-    if (!flag_electron_count && !flag_hole_count && !flag_open_errors) {
+    if (!flag_electron_count && !flag_hole_count && !openErrors) {
         std::cout << "ALL CHECKS PASSED";
     } else {
         if (flag_electron_count) std::cout << "[ELECTRON COUNT] ";
         if (flag_hole_count) std::cout << "[HOLE COUNT] ";
-        if (flag_open_errors) std::cout << "[FILE ACCESS]";
+        if (openErrors) std::cout << "[FILE ACCESS]";
     }
     std::cout << std::endl;
+
+    return resultFlags;  // Return combined flags as bitmask
 }
