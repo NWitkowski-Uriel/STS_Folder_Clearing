@@ -12,6 +12,9 @@
 #define FLAG_ELECTRON_ROOT         0x10   // Incorrect electron root file count
 #define FLAG_HOLE_ROOT             0x20   // Incorrect hole root file count
 #define FLAG_FILE_OPEN_ERROR       0x40   // File opening error
+#define FLAG_MODULE_ROOT           0x80   // Module test root file error
+#define FLAG_MODULE_TXT            0x100  // Module test txt file error
+#define FLAG_MODULE_PDF            0x200  // Module test pdf file error
 
 int CheckPscanFiles(const char* targetDir) {
     int resultFlags = 0;  // Initialize flag container (bitmask)
@@ -32,40 +35,81 @@ int CheckPscanFiles(const char* targetDir) {
         std::cerr << "Target folder: " << fullTargetPath << std::endl;
         std::cerr << "Expected path: " << pscanDirPath << std::endl;
         
-        // Report status flags (human-readable format)
+        // Report status flags (including module_test results)
+        std::cout << "\n===== Module Test Files Status =====" << std::endl;
+        std::cout << "Module test root:  MISSING (pscan_files folder missing)" << std::endl;
+        std::cout << "Module test txt:   MISSING (pscan_files folder missing)" << std::endl;
+        std::cout << "Module test pdf:   MISSING (pscan_files folder missing)" << std::endl;
+        
         std::cout << "\n===== Final Flags Status =====" << std::endl;
         std::cout << "FLAG 0 (Pscan folder exists): 1" << std::endl;
         std::cout << "FLAG 1 (Electron txt):        1" << std::endl;
         std::cout << "FLAG 2 (Hole txt):            1" << std::endl;
         std::cout << "FLAG 3 (Electron root):       1" << std::endl;
         std::cout << "FLAG 4 (Hole root):           1" << std::endl;
-        std::cout << "\nSummary: [PSCAN_FILES FOLDER MISSING]" << std::endl;
+        std::cout << "FLAG 5 (Module root):         1" << std::endl;
+        std::cout << "FLAG 6 (Module txt):          1" << std::endl;
+        std::cout << "FLAG 7 (Module pdf):          1" << std::endl;
+        std::cout << "\nSummary: [PSCAN_FILES FOLDER MISSING] [MODULE ROOT] [MODULE TXT] [MODULE PDF]" << std::endl;
         
-        // Set flag and return immediately
+        // Set flag and return
         resultFlags |= FLAG_PSCAN_FOLDER_MISSING;
+        resultFlags |= FLAG_MODULE_ROOT;
+        resultFlags |= FLAG_MODULE_TXT;
+        resultFlags |= FLAG_MODULE_PDF;
         return resultFlags;
     }
+
+    // ===== Check module_test files in pscan_files directory =====
+    TString moduleRoot = TString::Format("%s/module_test_%s.root", pscanDirPath.Data(), targetDir);
+    TString moduleTxt = TString::Format("%s/module_test_%s.txt", pscanDirPath.Data(), targetDir);
+    TString modulePdf = TString::Format("%s/module_test_%s.pdf", pscanDirPath.Data(), targetDir);
+
+    bool moduleRootError = false;
+    bool moduleTxtError = false;
+    bool modulePdfError = false;
+
+    // Check module_test ROOT
+    if (gSystem->AccessPathName(moduleRoot, kFileExists)) {
+        moduleRootError = true;
+        std::cerr << "Error: Module test root file does not exist: " << moduleRoot << std::endl;
+    } else {
+        TFile* f_root = TFile::Open(moduleRoot, "READ");
+        if (!f_root || f_root->IsZombie()) {
+            moduleRootError = true;
+            std::cerr << "Error: Cannot open module test root file: " << moduleRoot << std::endl;
+        }
+        if (f_root) f_root->Close();
+    }
+
+    // Check module_test TXT
+    if (gSystem->AccessPathName(moduleTxt, kFileExists)) {
+        moduleTxtError = true;
+        std::cerr << "Error: Module test txt file does not exist: " << moduleTxt << std::endl;
+    } else {
+        std::ifstream f_txt(moduleTxt.Data());
+        if (!f_txt.is_open()) {
+            moduleTxtError = true;
+            std::cerr << "Error: Cannot open module test txt file: " << moduleTxt << std::endl;
+        } else {
+            f_txt.close();
+        }
+    }
+
+    // Check module_test PDF (existence only)
+    if (gSystem->AccessPathName(modulePdf, kFileExists)) {
+        modulePdfError = true;
+        std::cerr << "Error: Module test pdf file does not exist: " << modulePdf << std::endl;
+    }
+
+    // Set flags for module_test errors
+    if (moduleRootError) resultFlags |= FLAG_MODULE_ROOT;
+    if (moduleTxtError) resultFlags |= FLAG_MODULE_TXT;
+    if (modulePdfError) resultFlags |= FLAG_MODULE_PDF;
 
     // Attempt to access directory contents
     TSystemDirectory pscanDir("pscan_files", pscanDirPath);
     TList* files = pscanDir.GetListOfFiles();
-    
-    // Handle directory access failure
-    if (!files) {
-        std::cerr << "Error: Could not read directory contents: " << pscanDirPath << std::endl;
-        
-        // Report status flags
-        std::cout << "\n===== Final Flags Status =====" << std::endl;
-        std::cout << "FLAG 0 (Directory access):  1" << std::endl;
-        std::cout << "FLAG 1 (Electron txt):      1" << std::endl;
-        std::cout << "FLAG 2 (Hole txt):          1" << std::endl;
-        std::cout << "FLAG 3 (Electron root):     1" << std::endl;
-        std::cout << "FLAG 4 (Hole root):         1" << std::endl;
-        std::cout << "\nSummary: [DIRECTORY ACCESS ERROR]" << std::endl;
-        
-        resultFlags |= FLAG_DIR_ACCESS_ERROR;
-        return resultFlags;
-    }
 
     // Initialize counters for validation
     int electronTxtCount = 0;    // Tracks electron text files
@@ -146,7 +190,10 @@ int CheckPscanFiles(const char* targetDir) {
     if (flag_electron_root) resultFlags |= FLAG_ELECTRON_ROOT;
     if (flag_hole_root) resultFlags |= FLAG_HOLE_ROOT;
     if (openErrors) resultFlags |= FLAG_FILE_OPEN_ERROR;
-    
+
+    // Report module_test status
+    std::cout << "\n===== Files Status =====" << std::endl;
+
     // Report file counts and validation status
     std::cout << "Electron text files: " << electronTxtCount << "/8 | "
               << "Status: " << (flag_electron_txt ? "FAIL" : "OK") 
@@ -164,27 +211,38 @@ int CheckPscanFiles(const char* targetDir) {
               << "Status: " << (flag_hole_root ? "FAIL" : "OK")
               << (holeRootCount < 8 ? " (UNDER)" : (holeRootCount > 8 ? " (OVER)" : "")) << std::endl;
               
+    std::cout << "Module test root:  " << (moduleRootError ? "MISSING/ERROR" : "OK") << std::endl;
+    std::cout << "Module test txt:   " << (moduleTxtError ? "MISSING/ERROR" : "OK") << std::endl;
+    std::cout << "Module test pdf:   " << (modulePdfError ? "MISSING" : "OK") << std::endl;
     std::cout << "File accessibility:    " << (openErrors ? "ERRORS DETECTED" : "ALL FILES ACCESSIBLE") << std::endl;
               
     // Report flag status (bitmask interpretation)
     std::cout << "\n===== Final Flags Status (Bitmask) =====" << std::endl;
-    std::cout << "FLAG 0 (Electron txt):    " << flag_electron_txt << std::endl;
-    std::cout << "FLAG 1 (Hole txt):        " << flag_hole_txt << std::endl;
-    std::cout << "FLAG 2 (Electron root):   " << flag_electron_root << std::endl;
-    std::cout << "FLAG 3 (Hole root):       " << flag_hole_root << std::endl;
-    std::cout << "FLAG 4 (File access):     " << openErrors << std::endl;
+    std::cout << "FLAG 0 (Pscan folder exists): 0" << std::endl;
+    std::cout << "FLAG 1 (Electron txt):        " << flag_electron_txt << std::endl;
+    std::cout << "FLAG 2 (Hole txt):            " << flag_hole_txt << std::endl;
+    std::cout << "FLAG 3 (Electron root):       " << flag_electron_root << std::endl;
+    std::cout << "FLAG 4 (Hole root):           " << flag_hole_root << std::endl;
+    std::cout << "FLAG 5 (File access):         " << openErrors << std::endl;
+    std::cout << "FLAG 6 (Module root):         " << moduleRootError << std::endl;
+    std::cout << "FLAG 7 (Module txt):          " << moduleTxtError << std::endl;
+    std::cout << "FLAG 8 (Module pdf):          " << modulePdfError << std::endl;
     
     // Generate summary of issues
     std::cout << "\nSummary: ";
-    if (!flag_electron_txt && !flag_hole_txt && 
-        !flag_electron_root && !flag_hole_root && !openErrors) {
+    if (!flag_electron_txt && !flag_hole_txt && !flag_electron_root && 
+        !flag_hole_root && !openErrors && !moduleTxtError && 
+        !moduleRootError && !modulePdfError) {
         std::cout << "ALL CHECKS PASSED";
     } else {
         if (flag_electron_txt) std::cout << "[ELECTRON TXT COUNT] ";
         if (flag_hole_txt) std::cout << "[HOLE TXT COUNT] ";
         if (flag_electron_root) std::cout << "[ELECTRON ROOT COUNT] ";
         if (flag_hole_root) std::cout << "[HOLE ROOT COUNT] ";
-        if (openErrors) std::cout << "[FILE ACCESS ISSUES]";
+        if (openErrors) std::cout << "[FILE ACCESS ISSUES] ";
+        if (moduleTxtError) std::cout << "[MODULE TXT] ";
+        if (moduleRootError) std::cout << "[MODULE ROOT] ";
+        if (modulePdfError) std::cout << "[MODULE PDF] ";
     }
     std::cout << std::endl;
 

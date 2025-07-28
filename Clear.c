@@ -28,6 +28,9 @@
 #define PSCAN_FLAG_ELECTRON_ROOT         0x10
 #define PSCAN_FLAG_HOLE_ROOT             0x20
 #define PSCAN_FLAG_FILE_OPEN_ERROR       0x40
+#define PSCAN_FLAG_MODULE_ROOT           0x80
+#define PSCAN_FLAG_MODULE_TXT            0x100
+#define PSCAN_FLAG_MODULE_PDF            0x200
 
 // ===================================================================
 // Flag definitions for CheckConnFiles (must match CheckConnFiles.c)
@@ -71,6 +74,9 @@ std::string decodePscanFlags(int flags) {
     if (flags & PSCAN_FLAG_ELECTRON_ROOT)         messages.push_back("ELECTRON_ROOT_COUNT_ERROR");
     if (flags & PSCAN_FLAG_HOLE_ROOT)             messages.push_back("HOLE_ROOT_COUNT_ERROR");
     if (flags & PSCAN_FLAG_FILE_OPEN_ERROR)       messages.push_back("FILE_OPEN_ERROR");
+    if (flags & PSCAN_FLAG_MODULE_ROOT)           messages.push_back("MODULE_ROOT_ERROR");
+    if (flags & PSCAN_FLAG_MODULE_TXT)            messages.push_back("MODULE_TXT_ERROR");
+    if (flags & PSCAN_FLAG_MODULE_PDF)            messages.push_back("MODULE_PDF_MISSING");
     
     std::string result;
     for (size_t i = 0; i < messages.size(); ++i) {

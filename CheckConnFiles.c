@@ -113,6 +113,7 @@ int CheckConnFiles(const char* targetDir) {
     if (openErrors) resultFlags |= FLAG_FILE_OPEN_ERROR;
     
     // Report file counts and validation status
+    std::cout << "\n===== Files Status =====" << std::endl;
     std::cout << "Electron files: " << electronCount << "/8 | "
               << "Status: " << (flag_electron_count ? "FAIL" : "OK") 
               << (electronCount < 8 ? " (UNDER)" : (electronCount > 8 ? " (OVER)" : "")) << std::endl;
