@@ -1,4 +1,3 @@
-// runClearAndPscan.C
 #include <TSystem.h>
 #include <TString.h>
 #include <TSystemDirectory.h>
@@ -8,38 +7,36 @@
 #include <iostream>
 #include <vector>
 #include <map>
+#include <iomanip> // For std::setprecision
 
 // ===================================================================
 // Flag definitions for CheckTrimFiles (must match CheckTrimFiles.c)
 // ===================================================================
-#define TRIM_FLAG_FOLDER_MISSING       0x01
-#define TRIM_FLAG_TRIM_FOLDER_MISSING  0x02
-#define TRIM_FLAG_DIR_ACCESS_ERROR     0x04
-#define TRIM_FLAG_ELECTRON_COUNT       0x08
-#define TRIM_FLAG_HOLE_COUNT           0x10
-#define TRIM_FLAG_FILE_OPEN_ERROR      0x20
+#define TRIM_FLAG_TRIM_FOLDER_MISSING  0x01
+#define TRIM_FLAG_DIR_ACCESS_ERROR     0x02
+#define TRIM_FLAG_ELECTRON_COUNT       0x04
+#define TRIM_FLAG_HOLE_COUNT           0x08
+#define TRIM_FLAG_FILE_OPEN_ERROR      0x10
 
 // ===================================================================
 // Flag definitions for CheckPscanFiles (must match CheckPscanFiles.c)
 // ===================================================================
-#define PSCAN_FLAG_FOLDER_MISSING        0x01
-#define PSCAN_FLAG_PSCAN_FOLDER_MISSING  0x02
-#define PSCAN_FLAG_DIR_ACCESS_ERROR      0x04
-#define PSCAN_FLAG_ELECTRON_TXT          0x08
-#define PSCAN_FLAG_HOLE_TXT              0x10
-#define PSCAN_FLAG_ELECTRON_ROOT         0x20
-#define PSCAN_FLAG_HOLE_ROOT             0x40
-#define PSCAN_FLAG_FILE_OPEN_ERROR       0x80
+#define PSCAN_FLAG_PSCAN_FOLDER_MISSING  0x01
+#define PSCAN_FLAG_DIR_ACCESS_ERROR      0x02
+#define PSCAN_FLAG_ELECTRON_TXT          0x04
+#define PSCAN_FLAG_HOLE_TXT              0x08
+#define PSCAN_FLAG_ELECTRON_ROOT         0x10
+#define PSCAN_FLAG_HOLE_ROOT             0x20
+#define PSCAN_FLAG_FILE_OPEN_ERROR       0x40
 
 // ===================================================================
 // Flag definitions for CheckConnFiles (must match CheckConnFiles.c)
 // ===================================================================
-#define CONN_FLAG_FOLDER_MISSING         0x01
-#define CONN_FLAG_CONN_FOLDER_MISSING    0x02
-#define CONN_FLAG_DIR_ACCESS_ERROR       0x04
-#define CONN_FLAG_ELECTRON_COUNT         0x08
-#define CONN_FLAG_HOLE_COUNT             0x10
-#define CONN_FLAG_FILE_OPEN_ERROR        0x20
+#define CONN_FLAG_CONN_FOLDER_MISSING    0x01
+#define CONN_FLAG_DIR_ACCESS_ERROR       0x02
+#define CONN_FLAG_ELECTRON_COUNT         0x04
+#define CONN_FLAG_HOLE_COUNT             0x08
+#define CONN_FLAG_FILE_OPEN_ERROR        0x10
 
 // Typ wskaźnika do funkcji walidacyjnej
 typedef int (*CheckFunction)(const char*);
@@ -49,7 +46,6 @@ std::string decodeTrimFlags(int flags) {
     if (flags == 0) return "OK";
     
     std::vector<std::string> messages;
-    if (flags & TRIM_FLAG_FOLDER_MISSING)      messages.push_back("TARGET_FOLDER_MISSING");
     if (flags & TRIM_FLAG_TRIM_FOLDER_MISSING) messages.push_back("TRIM_FILES_FOLDER_MISSING");
     if (flags & TRIM_FLAG_DIR_ACCESS_ERROR)    messages.push_back("DIR_ACCESS_ERROR");
     if (flags & TRIM_FLAG_ELECTRON_COUNT)      messages.push_back("ELECTRON_COUNT_ERROR");
@@ -68,9 +64,8 @@ std::string decodePscanFlags(int flags) {
     if (flags == 0) return "OK";
     
     std::vector<std::string> messages;
-    if (flags & PSCAN_FLAG_FOLDER_MISSING)        messages.push_back("TARGET_FOLDER_MISSING");
     if (flags & PSCAN_FLAG_PSCAN_FOLDER_MISSING)  messages.push_back("PSCAN_FILES_FOLDER_MISSING");
-    if (flags & PSCAN_FLAG_DIR_ACCESS_ERROR)       messages.push_back("DIR_ACCESS_ERROR");
+    if (flags & PSCAN_FLAG_DIR_ACCESS_ERROR)      messages.push_back("DIR_ACCESS_ERROR");
     if (flags & PSCAN_FLAG_ELECTRON_TXT)          messages.push_back("ELECTRON_TXT_COUNT_ERROR");
     if (flags & PSCAN_FLAG_HOLE_TXT)              messages.push_back("HOLE_TXT_COUNT_ERROR");
     if (flags & PSCAN_FLAG_ELECTRON_ROOT)         messages.push_back("ELECTRON_ROOT_COUNT_ERROR");
@@ -89,8 +84,7 @@ std::string decodeConnFlags(int flags) {
     if (flags == 0) return "OK";
     
     std::vector<std::string> messages;
-    if (flags & CONN_FLAG_FOLDER_MISSING)        messages.push_back("TARGET_FOLDER_MISSING");
-    if (flags & CONN_FLAG_CONN_FOLDER_MISSING)   messages.push_back("CONN_FILES_FOLDER_MISSING");
+    if (flags & CONN_FLAG_CONN_FOLDER_MISSING)   messages.push_back("CONN_CHECK_FILES_FOLDER_MISSING");
     if (flags & CONN_FLAG_DIR_ACCESS_ERROR)      messages.push_back("DIR_ACCESS_ERROR");
     if (flags & CONN_FLAG_ELECTRON_COUNT)        messages.push_back("ELECTRON_COUNT_ERROR");
     if (flags & CONN_FLAG_HOLE_COUNT)            messages.push_back("HOLE_COUNT_ERROR");

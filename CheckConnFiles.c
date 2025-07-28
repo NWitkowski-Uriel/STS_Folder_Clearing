@@ -111,13 +111,6 @@ int CheckConnFiles(const char* targetDir) {
     if (flag_electron_count) resultFlags |= FLAG_ELECTRON_COUNT;
     if (flag_hole_count) resultFlags |= FLAG_HOLE_COUNT;
     if (openErrors) resultFlags |= FLAG_FILE_OPEN_ERROR;
-
-    // Generate comprehensive validation report
-    std::cout << "\n===== Validation Report =====" << std::endl;
-    std::cout << "Current location:        " << currentDir << std::endl;
-    std::cout << "Target directory:        " << targetDir << std::endl;
-    std::cout << "Full target path:        " << fullTargetPath << std::endl;
-    std::cout << "Connection check location: " << connDirPath << std::endl;
     
     // Report file counts and validation status
     std::cout << "Electron files: " << electronCount << "/8 | "
