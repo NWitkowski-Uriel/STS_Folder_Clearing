@@ -9,7 +9,7 @@
 #define FLAG_LOG_MISSING         0x02  // Log file missing
 #define FLAG_DATA_MISSING        0x04  // No matching data files found
 #define FLAG_NO_FEB_FILE         0x08  // No tester_febs_* files found
-#define FLAG_FILE_OPEN_ERROR     0x10  // File opening error
+#define FLAG_FILE_OPEN           0x10  // File opening error
 #define FLAG_DATA_EMPTY          0x20  // All matching data files are empty
 #define FLAG_DATA_INVALID        0x40  // Data file content is invalid
 
@@ -161,7 +161,7 @@ int CheckLogFiles(const char* targetDir) {
         resultFlags |= FLAG_NO_FEB_FILE;
     }
     if (openErrors) {
-        resultFlags |= FLAG_FILE_OPEN_ERROR;
+        resultFlags |= FLAG_FILE_OPEN;
     }
 
     // Report file statuses
@@ -193,7 +193,7 @@ int CheckLogFiles(const char* targetDir) {
     std::cout << "FLAG_LOG_MISSING:     " << ((resultFlags & FLAG_LOG_MISSING) ? 1 : 0) << std::endl;
     std::cout << "FLAG_DATA_MISSING:    " << ((resultFlags & FLAG_DATA_MISSING) ? 1 : 0) << std::endl;
     std::cout << "FLAG_NO_FEB_FILE:     " << ((resultFlags & FLAG_NO_FEB_FILE) ? 1 : 0) << std::endl;
-    std::cout << "FLAG_FILE_OPEN_ERROR: " << ((resultFlags & FLAG_FILE_OPEN_ERROR) ? 1 : 0) << std::endl;
+    std::cout << "FLAG_FILE_OPEN:       " << ((resultFlags & FLAG_FILE_OPEN) ? 1 : 0) << std::endl;
     std::cout << "FLAG_DATA_EMPTY:      " << ((resultFlags & FLAG_DATA_EMPTY) ? 1 : 0) << std::endl;
     std::cout << "FLAG_DATA_INVALID:    " << ((resultFlags & FLAG_DATA_INVALID) ? 1 : 0) << std::endl;
 
@@ -206,7 +206,7 @@ int CheckLogFiles(const char* targetDir) {
         if (resultFlags & FLAG_LOG_MISSING) std::cout << "[LOG FILE MISSING] ";
         if (resultFlags & FLAG_DATA_MISSING) std::cout << "[DATA FILE MISSING] ";
         if (resultFlags & FLAG_NO_FEB_FILE) std::cout << "[NO FEB FILES] ";
-        if (resultFlags & FLAG_FILE_OPEN_ERROR) std::cout << "[FILE OPEN ERROR] ";
+        if (resultFlags & FLAG_FILE_OPEN) std::cout << "[FILE OPEN ERROR] ";
         if (resultFlags & FLAG_DATA_EMPTY) std::cout << "[DATA FILE EMPTY] ";
         if (resultFlags & FLAG_DATA_INVALID) std::cout << "[DATA CONTENT INVALID]";
     }
