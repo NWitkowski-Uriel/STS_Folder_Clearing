@@ -17,10 +17,15 @@
 #include <map>
 #include <iomanip>
 #include <ctime>
+#include "TSystem.h"
+#include "TSystemDirectory.h"
+#include <TObjString.h>  
+#include <TCollection.h> 
 
 // ===================================================================
-// Flag definitions
+// Flag definitions (updated to include all flags from Check* programs)
 // ===================================================================
+// From CheckLogFiles.c
 #define LOG_FLAG_DIR_MISSING         0x01
 #define LOG_FLAG_LOG_MISSING         0x02
 #define LOG_FLAG_DATA_MISSING        0x04
@@ -28,29 +33,36 @@
 #define LOG_FLAG_FILE_OPEN           0x10
 #define LOG_FLAG_DATA_EMPTY          0x20
 #define LOG_FLAG_DATA_INVALID        0x40
+#define LOG_FLAG_UNEXPECTED_FILES    0x80
 
+// From CheckTrimFiles.c
 #define TRIM_FLAG_TRIM_FOLDER_MISSING  0x01
-#define TRIM_FLAG_DIR_ACCESS_ERROR     0x02
+#define TRIM_FLAG_DIR_ACCESS           0x02
 #define TRIM_FLAG_ELECTRON_COUNT       0x04
 #define TRIM_FLAG_HOLE_COUNT           0x08
-#define TRIM_FLAG_FILE_OPEN_ERROR      0x10
+#define TRIM_FLAG_FILE_OPEN            0x10
+#define TRIM_FLAG_UNEXPECTED_FILES     0x20
 
+// From CheckPscanFiles.c
 #define PSCAN_FLAG_PSCAN_FOLDER_MISSING  0x01
-#define PSCAN_FLAG_DIR_ACCESS_ERROR      0x02
+#define PSCAN_FLAG_DIR_ACCESS            0x02
 #define PSCAN_FLAG_ELECTRON_TXT          0x04
 #define PSCAN_FLAG_HOLE_TXT              0x08
 #define PSCAN_FLAG_ELECTRON_ROOT         0x10
 #define PSCAN_FLAG_HOLE_ROOT             0x20
-#define PSCAN_FLAG_FILE_OPEN_ERROR       0x40
+#define PSCAN_FLAG_FILE_OPEN             0x40
 #define PSCAN_FLAG_MODULE_ROOT           0x80
 #define PSCAN_FLAG_MODULE_TXT            0x100
 #define PSCAN_FLAG_MODULE_PDF            0x200
+#define PSCAN_FLAG_UNEXPECTED_FILES      0x400
 
+// From CheckConnFiles.c
 #define CONN_FLAG_CONN_FOLDER_MISSING    0x01
-#define CONN_FLAG_DIR_ACCESS_ERROR       0x02
+#define CONN_FLAG_DIR_ACCESS             0x02
 #define CONN_FLAG_ELECTRON_COUNT         0x04
 #define CONN_FLAG_HOLE_COUNT             0x08
-#define CONN_FLAG_FILE_OPEN_ERROR        0x10
+#define CONN_FLAG_FILE_OPEN              0x10
+#define CONN_FLAG_UNEXPECTED_FILES       0x20
 
 typedef int (*CheckFunction)(const char*);
 
@@ -77,7 +89,7 @@ private:
     std::streambuf* oldBuffer;
 };
 
-// Flag decoding functions
+// Flag decoding functions (updated to include all flags)
 std::string decodeLogFlags(int flags) {
     if (flags == 0) return "OK";
     
@@ -86,9 +98,10 @@ std::string decodeLogFlags(int flags) {
     if (flags & LOG_FLAG_LOG_MISSING)      messages.push_back("LOG_MISSING");
     if (flags & LOG_FLAG_DATA_MISSING)     messages.push_back("DATA_MISSING");
     if (flags & LOG_FLAG_NO_FEB_FILE)      messages.push_back("NO_FEB_FILE");
-    if (flags & LOG_FLAG_FILE_OPEN)        messages.push_back("FILE_OPEN_ERROR");
+    if (flags & LOG_FLAG_FILE_OPEN)        messages.push_back("FILE_OPEN");
     if (flags & LOG_FLAG_DATA_EMPTY)       messages.push_back("DATA_EMPTY");
     if (flags & LOG_FLAG_DATA_INVALID)     messages.push_back("DATA_INVALID");
+    if (flags & LOG_FLAG_UNEXPECTED_FILES) messages.push_back("UNEXPECTED_FILES");
     
     std::string result;
     for (size_t i = 0; i < messages.size(); ++i) {
@@ -103,10 +116,11 @@ std::string decodeTrimFlags(int flags) {
     
     std::vector<std::string> messages;
     if (flags & TRIM_FLAG_TRIM_FOLDER_MISSING) messages.push_back("TRIM_FILES_FOLDER_MISSING");
-    if (flags & TRIM_FLAG_DIR_ACCESS_ERROR)    messages.push_back("DIR_ACCESS_ERROR");
-    if (flags & TRIM_FLAG_ELECTRON_COUNT)      messages.push_back("ELECTRON_COUNT_ERROR");
-    if (flags & TRIM_FLAG_HOLE_COUNT)          messages.push_back("HOLE_COUNT_ERROR");
-    if (flags & TRIM_FLAG_FILE_OPEN_ERROR)     messages.push_back("FILE_OPEN_ERROR");
+    if (flags & TRIM_FLAG_DIR_ACCESS)          messages.push_back("DIR_ACCESS");
+    if (flags & TRIM_FLAG_ELECTRON_COUNT)      messages.push_back("ELECTRON_COUNT");
+    if (flags & TRIM_FLAG_HOLE_COUNT)          messages.push_back("HOLE_COUNT");
+    if (flags & TRIM_FLAG_FILE_OPEN)           messages.push_back("FILE_OPEN");
+    if (flags & TRIM_FLAG_UNEXPECTED_FILES)    messages.push_back("UNEXPECTED_FILES");
     
     std::string result;
     for (size_t i = 0; i < messages.size(); ++i) {
@@ -121,15 +135,16 @@ std::string decodePscanFlags(int flags) {
     
     std::vector<std::string> messages;
     if (flags & PSCAN_FLAG_PSCAN_FOLDER_MISSING)  messages.push_back("PSCAN_FILES_FOLDER_MISSING");
-    if (flags & PSCAN_FLAG_DIR_ACCESS_ERROR)      messages.push_back("DIR_ACCESS_ERROR");
-    if (flags & PSCAN_FLAG_ELECTRON_TXT)          messages.push_back("ELECTRON_TXT_COUNT_ERROR");
-    if (flags & PSCAN_FLAG_HOLE_TXT)              messages.push_back("HOLE_TXT_COUNT_ERROR");
-    if (flags & PSCAN_FLAG_ELECTRON_ROOT)         messages.push_back("ELECTRON_ROOT_COUNT_ERROR");
-    if (flags & PSCAN_FLAG_HOLE_ROOT)             messages.push_back("HOLE_ROOT_COUNT_ERROR");
-    if (flags & PSCAN_FLAG_FILE_OPEN_ERROR)       messages.push_back("FILE_OPEN_ERROR");
-    if (flags & PSCAN_FLAG_MODULE_ROOT)           messages.push_back("MODULE_ROOT_ERROR");
-    if (flags & PSCAN_FLAG_MODULE_TXT)            messages.push_back("MODULE_TXT_ERROR");
+    if (flags & PSCAN_FLAG_DIR_ACCESS)            messages.push_back("DIR_ACCESS");
+    if (flags & PSCAN_FLAG_ELECTRON_TXT)          messages.push_back("ELECTRON_TXT_COUNT");
+    if (flags & PSCAN_FLAG_HOLE_TXT)              messages.push_back("HOLE_TXT_COUNT");
+    if (flags & PSCAN_FLAG_ELECTRON_ROOT)         messages.push_back("ELECTRON_ROOT_COUNT");
+    if (flags & PSCAN_FLAG_HOLE_ROOT)             messages.push_back("HOLE_ROOT_COUNT");
+    if (flags & PSCAN_FLAG_FILE_OPEN)             messages.push_back("FILE_OPEN");
+    if (flags & PSCAN_FLAG_MODULE_ROOT)           messages.push_back("MODULE_ROOT");
+    if (flags & PSCAN_FLAG_MODULE_TXT)            messages.push_back("MODULE_TXT");
     if (flags & PSCAN_FLAG_MODULE_PDF)            messages.push_back("MODULE_PDF_MISSING");
+    if (flags & PSCAN_FLAG_UNEXPECTED_FILES)      messages.push_back("UNEXPECTED_FILES");
     
     std::string result;
     for (size_t i = 0; i < messages.size(); ++i) {
@@ -144,10 +159,11 @@ std::string decodeConnFlags(int flags) {
     
     std::vector<std::string> messages;
     if (flags & CONN_FLAG_CONN_FOLDER_MISSING)   messages.push_back("CONN_CHECK_FILES_FOLDER_MISSING");
-    if (flags & CONN_FLAG_DIR_ACCESS_ERROR)      messages.push_back("DIR_ACCESS_ERROR");
-    if (flags & CONN_FLAG_ELECTRON_COUNT)        messages.push_back("ELECTRON_COUNT_ERROR");
-    if (flags & CONN_FLAG_HOLE_COUNT)            messages.push_back("HOLE_COUNT_ERROR");
-    if (flags & CONN_FLAG_FILE_OPEN_ERROR)       messages.push_back("FILE_OPEN_ERROR");
+    if (flags & CONN_FLAG_DIR_ACCESS)            messages.push_back("DIR_ACCESS");
+    if (flags & CONN_FLAG_ELECTRON_COUNT)        messages.push_back("ELECTRON_COUNT");
+    if (flags & CONN_FLAG_HOLE_COUNT)            messages.push_back("HOLE_COUNT");
+    if (flags & CONN_FLAG_FILE_OPEN)             messages.push_back("FILE_OPEN");
+    if (flags & CONN_FLAG_UNEXPECTED_FILES)      messages.push_back("UNEXPECTED_FILES");
     
     std::string result;
     for (size_t i = 0; i < messages.size(); ++i) {
@@ -175,12 +191,14 @@ void SaveRootReport(const std::string& filename) {
     
     for (size_t i = 0; i < gReportPages.size(); i++) {
         std::string name = "Directory_" + std::to_string(i);
-        TObjString obj(gReportPages[i].c_str());
-        obj.Write(name.c_str());
+        TObjString* obj = new TObjString(gReportPages[i].c_str());  // Zmienione na wskaźnik
+        obj->Write(name.c_str());
+        delete obj;  // Zwolnienie pamięci
     }
     
-    TObjString summary(gGlobalSummary.c_str());
-    summary.Write("GlobalSummary");
+    TObjString* summary = new TObjString(gGlobalSummary.c_str());  // Zmienione na wskaźnik
+    summary->Write("GlobalSummary");
+    delete summary;  // Zwolnienie pamięci
     file.Close();
 }
 
@@ -290,7 +308,6 @@ void SavePdfReport(const std::string& filename) {
         
         pie->SetCircle(0.5, 0.25, 0.15);
         pie->Draw("r");
-        
     }
     
     // Text statistics

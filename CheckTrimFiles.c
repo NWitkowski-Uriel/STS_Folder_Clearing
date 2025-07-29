@@ -1,14 +1,16 @@
 #include <iostream>
 #include <fstream>
+#include <TObjString.h>  
+#include <TCollection.h>
 #include "TSystem.h"
 #include "TSystemDirectory.h"
 
 // Define flag constants using bitmask
 #define FLAG_TRIM_FOLDER_MISSING  0x01  // trim_files directory missing
-#define FLAG_DIR_ACCESS_ERROR     0x02  // Error accessing directory
+#define FLAG_DIR_ACCESS           0x02  // Error accessing directory
 #define FLAG_ELECTRON_COUNT       0x04  // Incorrect electron file count
 #define FLAG_HOLE_COUNT           0x08  // Incorrect hole file count
-#define FLAG_FILE_OPEN_ERROR      0x10  // File opening error
+#define FLAG_FILE_OPEN            0x10  // File opening error
 #define FLAG_UNEXPECTED_FILES     0x20  // Unexpected files found in directory
 
 int CheckTrimFiles(const char* targetDir) {
@@ -57,7 +59,7 @@ int CheckTrimFiles(const char* targetDir) {
         std::cout << "FLAG 2 (Hole count):        1" << std::endl;
         std::cout << "\nSummary: [DIRECTORY ACCESS ERROR]" << std::endl;
         
-        resultFlags |= FLAG_DIR_ACCESS_ERROR;
+        resultFlags |= FLAG_DIR_ACCESS;
         return resultFlags;
     }
 
@@ -119,7 +121,7 @@ int CheckTrimFiles(const char* targetDir) {
     // Update result flags based on validation
     if (flag_electron_count) resultFlags |= FLAG_ELECTRON_COUNT;
     if (flag_hole_count) resultFlags |= FLAG_HOLE_COUNT;
-    if (openErrors) resultFlags |= FLAG_FILE_OPEN_ERROR;
+    if (openErrors) resultFlags |= FLAG_FILE_OPEN;
     if (unexpectedFiles) resultFlags |= FLAG_UNEXPECTED_FILES;
     
     // Report file counts and validation status
