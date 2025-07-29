@@ -7,12 +7,12 @@
 
 // Define flag constants using bitmask
 #define FLAG_PSCAN_FOLDER_MISSING  0x01   // pscan_files directory missing
-#define FLAG_DIR_ACCESS_ERROR      0x02   // Error accessing directory
+#define FLAG_DIR_ACCESS            0x02   // Error accessing directory
 #define FLAG_ELECTRON_TXT          0x04   // Incorrect electron txt file count
 #define FLAG_HOLE_TXT              0x08   // Incorrect hole txt file count
 #define FLAG_ELECTRON_ROOT         0x10   // Incorrect electron root file count
 #define FLAG_HOLE_ROOT             0x20   // Incorrect hole root file count
-#define FLAG_FILE_OPEN_ERROR       0x40   // File opening error
+#define FLAG_FILE_OPEN             0x40   // File opening error
 #define FLAG_MODULE_ROOT           0x80   // Module test root file error
 #define FLAG_MODULE_TXT            0x100  // Module test txt file error
 #define FLAG_MODULE_PDF            0x200  // Module test pdf file error
@@ -237,7 +237,7 @@ int CheckPscanFiles(const char* targetDir) {
     if (flag_hole_txt) resultFlags |= FLAG_HOLE_TXT;
     if (flag_electron_root) resultFlags |= FLAG_ELECTRON_ROOT;
     if (flag_hole_root) resultFlags |= FLAG_HOLE_ROOT;
-    if (openErrors) resultFlags |= FLAG_FILE_OPEN_ERROR;
+    if (openErrors) resultFlags |= FLAG_FILE_OPEN;
     if (flag_unexpected_files) resultFlags |= FLAG_UNEXPECTED_FILES;
 
     // Report module_test status
