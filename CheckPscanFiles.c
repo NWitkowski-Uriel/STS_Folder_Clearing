@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <vector>
 #include "TSystem.h"
 #include "TSystemDirectory.h"
 #include "TFile.h"
@@ -15,6 +16,7 @@
 #define FLAG_MODULE_ROOT           0x80   // Module test root file error
 #define FLAG_MODULE_TXT            0x100  // Module test txt file error
 #define FLAG_MODULE_PDF            0x200  // Module test pdf file error
+#define FLAG_UNEXPECTED_FILES      0x400  // Unexpected files in directory
 
 int CheckPscanFiles(const char* targetDir) {
     int resultFlags = 0;  // Initialize flag container (bitmask)
@@ -117,6 +119,26 @@ int CheckPscanFiles(const char* targetDir) {
     int electronRootCount = 0;    // Tracks electron ROOT files
     int holeRootCount = 0;        // Tracks hole ROOT files
     bool openErrors = false;      // Flags file access issues
+    
+    // List of acceptable auxiliary files
+    std::vector<TString> acceptableAuxFiles = {
+        "a.txt",
+        "find_ASICs.sh",
+        "count_select_sort_files.sh",
+        "count_select_sort_root_files.sh",     
+        "execution.C",
+        "plot.txt",
+        "plot_1024.C",
+        "plot_1024_Maria.C",
+        "trim_adc.cxx",
+        "trim_adc.hxx",
+        "module_test_SETUP.root",
+        "module_test_SETUP.txt",
+        "module_test_SETUP.pdf"
+    };
+    
+    // List to collect unexpected files
+    std::vector<TString> unexpectedFiles;
 
     // Iterate through all directory entries
     TSystemFile* file;
@@ -176,6 +198,29 @@ int CheckPscanFiles(const char* targetDir) {
             // Clean up resources if file was opened
             if (rootFile) rootFile->Close();
         }
+        // Check for unexpected files
+        else {
+            // Check against module test files
+            TString modulePrefix = TString::Format("module_test_%s", targetDir);
+            bool isModuleFile = fileName.BeginsWith(modulePrefix) && 
+                               (fileName.EndsWith(".root") || 
+                                fileName.EndsWith(".txt") || 
+                                fileName.EndsWith(".pdf"));
+            
+            // Check against acceptable auxiliary files
+            bool isAcceptable = false;
+            for (const auto& auxFile : acceptableAuxFiles) {
+                if (fileName == auxFile) {
+                    isAcceptable = true;
+                    break;
+                }
+            }
+            
+            // Collect unexpected files
+            if (!isModuleFile && !isAcceptable) {
+                unexpectedFiles.push_back(fileName);
+            }
+        }
     }
 
     // Validate file counts against expected quantity (8 each)
@@ -183,6 +228,9 @@ int CheckPscanFiles(const char* targetDir) {
     bool flag_hole_txt = (holeTxtCount != 8);
     bool flag_electron_root = (electronRootCount != 8);
     bool flag_hole_root = (holeRootCount != 8);
+    
+    // Set flag if unexpected files found
+    bool flag_unexpected_files = !unexpectedFiles.empty();
 
     // Update result flags based on validation
     if (flag_electron_txt) resultFlags |= FLAG_ELECTRON_TXT;
@@ -190,6 +238,7 @@ int CheckPscanFiles(const char* targetDir) {
     if (flag_electron_root) resultFlags |= FLAG_ELECTRON_ROOT;
     if (flag_hole_root) resultFlags |= FLAG_HOLE_ROOT;
     if (openErrors) resultFlags |= FLAG_FILE_OPEN_ERROR;
+    if (flag_unexpected_files) resultFlags |= FLAG_UNEXPECTED_FILES;
 
     // Report module_test status
     std::cout << "\n===== Files Status =====" << std::endl;
@@ -215,6 +264,15 @@ int CheckPscanFiles(const char* targetDir) {
     std::cout << "Module test txt:   " << (moduleTxtError ? "MISSING/ERROR" : "OK") << std::endl;
     std::cout << "Module test pdf:   " << (modulePdfError ? "MISSING" : "OK") << std::endl;
     std::cout << "File accessibility:    " << (openErrors ? "ERRORS DETECTED" : "ALL FILES ACCESSIBLE") << std::endl;
+    
+    // Report unexpected files if any
+    if (!unexpectedFiles.empty()) {
+        std::cout << "\n===== Unexpected Files Found =====" << std::endl;
+        std::cout << "Number of unexpected files: " << unexpectedFiles.size() << std::endl;
+        for (const auto& file : unexpectedFiles) {
+            std::cout << "  - " << file << std::endl;
+        }
+    }
               
     // Report flag status (bitmask interpretation)
     std::cout << "\n===== Final Flags Status (Bitmask) =====" << std::endl;
@@ -227,12 +285,13 @@ int CheckPscanFiles(const char* targetDir) {
     std::cout << "FLAG 6 (Module root):         " << moduleRootError << std::endl;
     std::cout << "FLAG 7 (Module txt):          " << moduleTxtError << std::endl;
     std::cout << "FLAG 8 (Module pdf):          " << modulePdfError << std::endl;
+    std::cout << "FLAG 9 (Unexpected files):    " << flag_unexpected_files << std::endl;
     
     // Generate summary of issues
     std::cout << "\nSummary: ";
     if (!flag_electron_txt && !flag_hole_txt && !flag_electron_root && 
         !flag_hole_root && !openErrors && !moduleTxtError && 
-        !moduleRootError && !modulePdfError) {
+        !moduleRootError && !modulePdfError && !flag_unexpected_files) {
         std::cout << "ALL CHECKS PASSED";
     } else {
         if (flag_electron_txt) std::cout << "[ELECTRON TXT COUNT] ";
@@ -243,6 +302,7 @@ int CheckPscanFiles(const char* targetDir) {
         if (moduleTxtError) std::cout << "[MODULE TXT] ";
         if (moduleRootError) std::cout << "[MODULE ROOT] ";
         if (modulePdfError) std::cout << "[MODULE PDF] ";
+        if (flag_unexpected_files) std::cout << "[UNEXPECTED FILES] ";
     }
     std::cout << std::endl;
 
