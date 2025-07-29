@@ -9,6 +9,7 @@
 #define FLAG_ELECTRON_COUNT       0x04  // Incorrect electron file count
 #define FLAG_HOLE_COUNT           0x08  // Incorrect hole file count
 #define FLAG_FILE_OPEN_ERROR      0x10  // File opening error
+#define FLAG_UNEXPECTED_FILES     0x20  // Unexpected files found in directory
 
 int CheckTrimFiles(const char* targetDir) {
     int resultFlags = 0;  // Initialize flag container (bitmask)
@@ -64,6 +65,8 @@ int CheckTrimFiles(const char* targetDir) {
     int electronCount = 0;     // Tracks electron-related files
     int holeCount = 0;         // Tracks hole-related files
     bool openErrors = false;   // Flags file access issues
+    bool unexpectedFiles = false; // Flags presence of unexpected files
+    TList unexpectedFileList;  // Stores names of unexpected files
 
     // Iterate through all directory entries
     TSystemFile* file;
@@ -102,6 +105,11 @@ int CheckTrimFiles(const char* targetDir) {
                 f_test.close();  // Properly close accessible files
             }
         }
+        // Handle unexpected files
+        else {
+            unexpectedFiles = true;
+            unexpectedFileList.Add(new TObjString(fileName));
+        }
     }
 
     // Validate file counts against expected quantity (8 each)
@@ -112,6 +120,7 @@ int CheckTrimFiles(const char* targetDir) {
     if (flag_electron_count) resultFlags |= FLAG_ELECTRON_COUNT;
     if (flag_hole_count) resultFlags |= FLAG_HOLE_COUNT;
     if (openErrors) resultFlags |= FLAG_FILE_OPEN_ERROR;
+    if (unexpectedFiles) resultFlags |= FLAG_UNEXPECTED_FILES;
     
     // Report file counts and validation status
     std::cout << "\n===== Files Status =====" << std::endl;
@@ -124,23 +133,40 @@ int CheckTrimFiles(const char* targetDir) {
               << (holeCount < 8 ? " (UNDER)" : (holeCount > 8 ? " (OVER)" : "")) << std::endl;
               
     std::cout << "File accessibility: " << (openErrors ? "ERRORS" : "ALL OK") << std::endl;
+    
+    // Report unexpected files if any
+    if (unexpectedFiles) {
+        std::cout << "\n===== UNEXPECTED FILES FOUND =====" << std::endl;
+        std::cout << "Files without '_elect.txt' or '_holes.txt' suffix:" << std::endl;
+        
+        TIter nextUnexpected(&unexpectedFileList);
+        TObjString* item;
+        while ((item = (TObjString*)nextUnexpected())) {
+            std::cout << " - " << item->GetString().Data() << std::endl;
+        }
+    }
               
     // Report flag status (bitmask interpretation)
     std::cout << "\n===== Final Flags Status (Bitmask) =====" << std::endl;
     std::cout << "FLAG 0 (Electron count): " << flag_electron_count << std::endl;
     std::cout << "FLAG 1 (Hole count):     " << flag_hole_count << std::endl;
     std::cout << "FLAG 2 (File access):    " << openErrors << std::endl;
+    std::cout << "FLAG 3 (Unexpected):     " << unexpectedFiles << std::endl;
     
     // Generate summary of issues
     std::cout << "\nSummary: ";
-    if (!flag_electron_count && !flag_hole_count && !openErrors) {
+    if (!flag_electron_count && !flag_hole_count && !openErrors && !unexpectedFiles) {
         std::cout << "ALL CHECKS PASSED";
     } else {
         if (flag_electron_count) std::cout << "[ELECTRON COUNT] ";
         if (flag_hole_count) std::cout << "[HOLE COUNT] ";
-        if (openErrors) std::cout << "[FILE ACCESS]";
+        if (openErrors) std::cout << "[FILE ACCESS] ";
+        if (unexpectedFiles) std::cout << "[UNEXPECTED FILES]";
     }
     std::cout << std::endl;
+
+    // Clean up unexpected files list
+    unexpectedFileList.Delete();
 
     return resultFlags;  // Return combined flags as bitmask
 }
