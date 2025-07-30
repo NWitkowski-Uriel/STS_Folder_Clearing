@@ -191,18 +191,18 @@ void SaveRootReport(const std::string& filename) {
     
     for (size_t i = 0; i < gReportPages.size(); i++) {
         std::string name = "Directory_" + std::to_string(i);
-        TObjString* obj = new TObjString(gReportPages[i].c_str());  // Zmienione na wskaźnik
+        TObjString* obj = new TObjString(gReportPages[i].c_str());
         obj->Write(name.c_str());
-        delete obj;  // Zwolnienie pamięci
+        delete obj;
     }
     
-    TObjString* summary = new TObjString(gGlobalSummary.c_str());  // Zmienione na wskaźnik
+    TObjString* summary = new TObjString(gGlobalSummary.c_str());
     summary->Write("GlobalSummary");
-    delete summary;  // Zwolnienie pamięci
+    delete summary;
     file.Close();
 }
 
-void SavePdfReport(const std::string& filename) {
+void SavePdfReport(const std::string& filename, const std::string& currentDir) {
     TCanvas canvas("canvas", "Validation Report", 800, 1200);
     canvas.Print((filename + "[").c_str());
 
@@ -211,7 +211,7 @@ void SavePdfReport(const std::string& filename) {
     TLatex title;
     title.SetTextSize(0.04);
     title.SetTextAlign(22);
-    title.DrawLatexNDC(0.5, 0.7, "VALIDATION REPORT");
+    title.DrawLatexNDC(0.5, 0.7, TString::Format("Validation report for ladder: %s", currentDir.c_str()));
     
     // Get current date and time
     time_t now = time(0);
@@ -231,7 +231,7 @@ void SavePdfReport(const std::string& filename) {
         
         // Content panel
         TPad* contentPad = (TPad*)canvas.cd(2);
-        contentPad->SetPad(0.05, 0.05, 0.95, 0.85);
+        contentPad->SetPad(0.05, 0.05, 0.95, 0.95);
         contentPad->Draw();
         contentPad->cd();
         
@@ -244,11 +244,11 @@ void SavePdfReport(const std::string& filename) {
         }
         
         // Draw formatted text
-        double y = 0.95;
-        double textSize = 0.015;
+        double y = 1.;
+        double textSize = 0.02;
         
         for (const auto& ln : lines) {
-            TText* t = new TText(0.05, y, ln.c_str());
+            TText* t = new TText(0.03, y, ln.c_str());
             t->SetTextSize(textSize);
             
             // Color coding
@@ -260,11 +260,11 @@ void SavePdfReport(const std::string& filename) {
                 t->SetTextColor(kOrange+7);
             } else if (ln.find("DIRECTORY") != std::string::npos) {
                 t->SetTextColor(kBlue);
-                t->SetTextSize(textSize * 1.2);
+                t->SetTextSize(textSize * 1.1);
             }
             
             t->Draw();
-            y -= 0.01;
+            y -= 0.015;
         }
         
         canvas.Print(filename.c_str());
@@ -296,7 +296,7 @@ void SavePdfReport(const std::string& filename) {
     
     // Pie chart
     if (gPassedDirs > 0 || gFailedDirs > 0) {
-        TPie* pie = new TPie("pie", "Validation Results", 2);
+        TPie* pie = new TPie("pie", "", 2);
         
         pie->SetEntryVal(0, gPassedDirs);
         pie->SetEntryLabel(0, "Passed");
@@ -315,12 +315,12 @@ void SavePdfReport(const std::string& filename) {
     std::istringstream summaryStream(gGlobalSummary);
     std::string summaryLine;
     while (std::getline(summaryStream, summaryLine)) {
-        TText* t = new TText(0.25, y, summaryLine.c_str());
-        t->SetTextSize(0.015);
+        TText* t = new TText(0.1, y, summaryLine.c_str());
+        t->SetTextSize(0.025);
         
         if (summaryLine.find("Success rate") != std::string::npos) {
-            t->SetTextColor(kBlue);
-            t->SetTextSize(0.015);
+            t->SetTextColor(kGreen+2);
+            t->SetTextSize(0.025);
         }
         
         t->Draw();
@@ -338,6 +338,9 @@ void Clear() {
     gPassedDirs = 0;
     gFailedDirs = 0;
 
+    // Get current directory name
+    TString currentDir = gSystem->BaseName(gSystem->WorkingDirectory());
+    
     // Get list of directories
     TSystemDirectory dir(".", ".");
     TList* files = dir.GetListOfFiles();
@@ -505,7 +508,7 @@ void Clear() {
         }
 
         // Generate directory report
-        std::cout << "\n\n====================================================" << std::endl;
+        std::cout << "\n====================================================" << std::endl;
         std::cout << "VALIDATION REPORT FOR: " << dir << std::endl;
         std::cout << "====================================================" << std::endl;
         
@@ -549,7 +552,7 @@ void Clear() {
     // Generate global summary
     std::stringstream summary;
     summary << "\n\n====================================================" << std::endl;
-    summary << "FINAL VALIDATION SUMMARY" << std::endl;
+    summary << "LADDER " << currentDir  << " VALIDATION SUMMARY" << std::endl;
     summary << "====================================================" << std::endl;
     summary << "Scanned directories: " << totalDirs << std::endl;
     summary << "Passed:             " << gPassedDirs << std::endl;
@@ -562,8 +565,9 @@ void Clear() {
     gGlobalSummary = summary.str();
     std::cout << gGlobalSummary << std::endl;
 
-    // Save reports
-    SaveTxtReport("ValidationReport.txt");
-    SaveRootReport("ValidationReport.root");
-    SavePdfReport("ValidationReport.pdf");
+    // Save reports with current directory name
+    std::string reportBaseName = "ValidationReport_" + std::string(currentDir.Data());
+    SaveTxtReport(reportBaseName + ".txt");
+    SaveRootReport(reportBaseName + ".root");
+    SavePdfReport(reportBaseName + ".pdf", currentDir.Data());
 }

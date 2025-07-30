@@ -32,13 +32,6 @@ int CheckTrimFiles(const char* targetDir) {
         std::cerr << "Target folder: " << fullTargetPath << std::endl;
         std::cerr << "Expected path: " << trimDirPath << std::endl;
         
-        // Report status flags (human-readable format)
-        std::cout << "\n===== Final Flags Status =====" << std::endl;
-        std::cout << "FLAG 0 (Trim folder exists):  1" << std::endl;
-        std::cout << "FLAG 1 (Electron count):      1" << std::endl;
-        std::cout << "FLAG 2 (Hole count):          1" << std::endl;
-        std::cout << "\nSummary: [TRIM_FILES FOLDER MISSING]" << std::endl;
-        
         // Set flag and return immediately
         resultFlags |= FLAG_TRIM_FOLDER_MISSING;
         return resultFlags;
@@ -51,13 +44,6 @@ int CheckTrimFiles(const char* targetDir) {
     // Handle directory access failure
     if (!files) {
         std::cerr << "Error: Could not read directory contents: " << trimDirPath << std::endl;
-        
-        // Report status flags
-        std::cout << "\n===== Final Flags Status =====" << std::endl;
-        std::cout << "FLAG 0 (Directory access):  1" << std::endl;
-        std::cout << "FLAG 1 (Electron count):    1" << std::endl;
-        std::cout << "FLAG 2 (Hole count):        1" << std::endl;
-        std::cout << "\nSummary: [DIRECTORY ACCESS ERROR]" << std::endl;
         
         resultFlags |= FLAG_DIR_ACCESS;
         return resultFlags;
@@ -147,13 +133,6 @@ int CheckTrimFiles(const char* targetDir) {
             std::cout << " - " << item->GetString().Data() << std::endl;
         }
     }
-              
-    // Report flag status (bitmask interpretation)
-    std::cout << "\n===== Final Flags Status (Bitmask) =====" << std::endl;
-    std::cout << "FLAG 0 (Electron count): " << flag_electron_count << std::endl;
-    std::cout << "FLAG 1 (Hole count):     " << flag_hole_count << std::endl;
-    std::cout << "FLAG 2 (File access):    " << openErrors << std::endl;
-    std::cout << "FLAG 3 (Unexpected):     " << unexpectedFiles << std::endl;
     
     // Generate summary of issues
     std::cout << "\nSummary: ";

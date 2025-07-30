@@ -37,28 +37,9 @@ int CheckPscanFiles(const char* targetDir) {
         std::cerr << "Target folder: " << fullTargetPath << std::endl;
         std::cerr << "Expected path: " << pscanDirPath << std::endl;
         
-        // Report status flags (including module_test results)
-        std::cout << "\n===== Module Test Files Status =====" << std::endl;
-        std::cout << "Module test root:  MISSING (pscan_files folder missing)" << std::endl;
-        std::cout << "Module test txt:   MISSING (pscan_files folder missing)" << std::endl;
-        std::cout << "Module test pdf:   MISSING (pscan_files folder missing)" << std::endl;
-        
-        std::cout << "\n===== Final Flags Status =====" << std::endl;
-        std::cout << "FLAG 0 (Pscan folder exists): 1" << std::endl;
-        std::cout << "FLAG 1 (Electron txt):        1" << std::endl;
-        std::cout << "FLAG 2 (Hole txt):            1" << std::endl;
-        std::cout << "FLAG 3 (Electron root):       1" << std::endl;
-        std::cout << "FLAG 4 (Hole root):           1" << std::endl;
-        std::cout << "FLAG 5 (Module root):         1" << std::endl;
-        std::cout << "FLAG 6 (Module txt):          1" << std::endl;
-        std::cout << "FLAG 7 (Module pdf):          1" << std::endl;
-        std::cout << "\nSummary: [PSCAN_FILES FOLDER MISSING] [MODULE ROOT] [MODULE TXT] [MODULE PDF]" << std::endl;
-        
         // Set flag and return
         resultFlags |= FLAG_PSCAN_FOLDER_MISSING;
-        resultFlags |= FLAG_MODULE_ROOT;
-        resultFlags |= FLAG_MODULE_TXT;
-        resultFlags |= FLAG_MODULE_PDF;
+
         return resultFlags;
     }
 
@@ -273,19 +254,6 @@ int CheckPscanFiles(const char* targetDir) {
             std::cout << "  - " << file << std::endl;
         }
     }
-              
-    // Report flag status (bitmask interpretation)
-    std::cout << "\n===== Final Flags Status (Bitmask) =====" << std::endl;
-    std::cout << "FLAG 0 (Pscan folder exists): 0" << std::endl;
-    std::cout << "FLAG 1 (Electron txt):        " << flag_electron_txt << std::endl;
-    std::cout << "FLAG 2 (Hole txt):            " << flag_hole_txt << std::endl;
-    std::cout << "FLAG 3 (Electron root):       " << flag_electron_root << std::endl;
-    std::cout << "FLAG 4 (Hole root):           " << flag_hole_root << std::endl;
-    std::cout << "FLAG 5 (File access):         " << openErrors << std::endl;
-    std::cout << "FLAG 6 (Module root):         " << moduleRootError << std::endl;
-    std::cout << "FLAG 7 (Module txt):          " << moduleTxtError << std::endl;
-    std::cout << "FLAG 8 (Module pdf):          " << modulePdfError << std::endl;
-    std::cout << "FLAG 9 (Unexpected files):    " << flag_unexpected_files << std::endl;
     
     // Generate summary of issues
     std::cout << "\nSummary: ";

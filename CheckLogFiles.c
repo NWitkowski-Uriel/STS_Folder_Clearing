@@ -66,18 +66,6 @@ int CheckLogFiles(const char* targetDir) {
         // Report status
         std::cout << "\n===== Files Status =====" << std::endl;
         std::cout << "Target directory:    MISSING" << std::endl;
-        std::cout << "Log file:            MISSING (directory missing)" << std::endl;
-        std::cout << "Data files:          MISSING (directory missing)" << std::endl;
-        std::cout << "Tester FEB files:    MISSING (directory missing)" << std::endl;
-        
-        // Report final flags
-        std::cout << "\n===== Final Flags Status =====" << std::endl;
-        std::cout << "FLAG_DIR_MISSING:     1" << std::endl;
-        std::cout << "FLAG_LOG_MISSING:     1" << std::endl;
-        std::cout << "FLAG_DATA_MISSING:    1" << std::endl;
-        std::cout << "FLAG_NO_FEB_FILE:     1" << std::endl;
-        
-        std::cout << "\nSummary: [DIRECTORY MISSING] [LOG FILE MISSING] [DATA FILES MISSING] [NO FEB FILES]" << std::endl;
         
         return resultFlags;
     }
@@ -93,10 +81,7 @@ int CheckLogFiles(const char* targetDir) {
 
     // List of acceptable auxiliary files
     std::vector<TString> acceptableAuxFiles = {
-        "config.txt",
-        "setup.cfg",
-        "readme.md",
-        "notes.txt"
+
     };
 
     // Construct expected log file path
@@ -222,17 +207,6 @@ int CheckLogFiles(const char* targetDir) {
             std::cout << "  - " << file << std::endl;
         }
     }
-
-    // Report final flags status
-    std::cout << "\n===== Final Flags Status =====" << std::endl;
-    std::cout << "FLAG_DIR_MISSING:     " << ((resultFlags & FLAG_DIR_MISSING) ? 1 : 0) << std::endl;
-    std::cout << "FLAG_LOG_MISSING:     " << ((resultFlags & FLAG_LOG_MISSING) ? 1 : 0) << std::endl;
-    std::cout << "FLAG_DATA_MISSING:    " << ((resultFlags & FLAG_DATA_MISSING) ? 1 : 0) << std::endl;
-    std::cout << "FLAG_NO_FEB_FILE:     " << ((resultFlags & FLAG_NO_FEB_FILE) ? 1 : 0) << std::endl;
-    std::cout << "FLAG_FILE_OPEN:       " << ((resultFlags & FLAG_FILE_OPEN) ? 1 : 0) << std::endl;
-    std::cout << "FLAG_DATA_EMPTY:      " << ((resultFlags & FLAG_DATA_EMPTY) ? 1 : 0) << std::endl;
-    std::cout << "FLAG_DATA_INVALID:    " << ((resultFlags & FLAG_DATA_INVALID) ? 1 : 0) << std::endl;
-    std::cout << "FLAG_UNEXPECTED_FILES:" << ((resultFlags & FLAG_UNEXPECTED_FILES) ? 1 : 0) << std::endl;
 
     // Generate summary of issues
     std::cout << "\nSummary: ";
