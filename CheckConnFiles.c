@@ -1,5 +1,7 @@
 #include <iostream>
 #include <fstream>
+#include <vector>
+#include <string>
 #include <TObjString.h>  
 #include <TCollection.h>
 #include "TSystem.h"
@@ -13,13 +15,22 @@
 #define FLAG_FILE_OPEN               0x10  // File opening error
 #define FLAG_UNEXPECTED_FILES        0x20  // Unexpected files found in directory
 
-int CheckConnFiles(const char* targetDir) {
-    int resultFlags = 0;  // Initialize flag container (bitmask)
+// Structure to hold detailed results
+struct CheckConnFilesResult {
+    int flags = 0;                      // Bitmask of flags
+    int electronCount = 0;              // Count of electron files
+    int holeCount = 0;                  // Count of hole files
+    std::vector<std::string> openErrorFiles;     // Files that failed to open
+    std::vector<std::string> unexpectedFiles;    // Unexpected files in directory
+};
+
+CheckConnFilesResult CheckConnFiles(const char* targetDir) {
+    CheckConnFilesResult result;  // Initialize result structure
 
     // Get current working directory
     TString currentDir = gSystem->pwd();
     
-    // Construct full path to target directory (assumed to exist)
+    // Construct full path to target directory
     TString fullTargetPath = TString::Format("%s/%s", currentDir.Data(), targetDir);
     
     // Construct full path to conn_check_files directory
@@ -32,9 +43,8 @@ int CheckConnFiles(const char* targetDir) {
         std::cerr << "Target folder: " << fullTargetPath << std::endl;
         std::cerr << "Expected path: " << connDirPath << std::endl;
         
-        // Set flag and return immediately
-        resultFlags |= FLAG_CONN_FOLDER_MISSING;
-        return resultFlags;
+        result.flags |= FLAG_CONN_FOLDER_MISSING;
+        return result;
     }
 
     // Attempt to access directory contents
@@ -45,16 +55,9 @@ int CheckConnFiles(const char* targetDir) {
     if (!files) {
         std::cerr << "Error: Could not read directory contents: " << connDirPath << std::endl;
         
-        resultFlags |= FLAG_DIR_ACCESS;
-        return resultFlags;
+        result.flags |= FLAG_DIR_ACCESS;
+        return result;
     }
-
-    // Initialize counters for validation
-    int electronCount = 0;   // Tracks electron-related files
-    int holeCount = 0;       // Tracks hole-related files
-    bool openErrors = false; // Flags file access issues
-    bool unexpectedFiles = false; // Flags presence of unexpected files
-    TList unexpectedFileList;  // Stores names of unexpected files
 
     // Iterate through all directory entries
     TSystemFile* file;
@@ -68,85 +71,86 @@ int CheckConnFiles(const char* targetDir) {
         // Construct full file path
         TString filePath = TString::Format("%s/%s", connDirPath.Data(), fileName.Data());
 
-        // Process electron files (expected suffix: '_elect.txt')
+        // Process electron files
         if (fileName.EndsWith("_elect.txt")) {
-            electronCount++;
+            result.electronCount++;
             // Verify file accessibility
             std::ifstream f_test(filePath.Data());
             if (!f_test.is_open()) {
+                result.openErrorFiles.push_back(filePath.Data());
                 std::cerr << "Error: Cannot open electron file: " << filePath << std::endl;
-                openErrors = true;
             } else {
                 f_test.close();  // Properly close accessible files
             }
         }
-        // Process hole files (expected suffix: '_holes.txt')
+        // Process hole files
         else if (fileName.EndsWith("_holes.txt")) {
-            holeCount++;
+            result.holeCount++;
             // Verify file accessibility
             std::ifstream f_test(filePath.Data());
             if (!f_test.is_open()) {
+                result.openErrorFiles.push_back(filePath.Data());
                 std::cerr << "Error: Cannot open hole file: " << filePath << std::endl;
-                openErrors = true;
             } else {
                 f_test.close();  // Properly close accessible files
             }
         }
         // Handle unexpected files
         else {
-            unexpectedFiles = true;
-            unexpectedFileList.Add(new TObjString(fileName));
+            result.unexpectedFiles.push_back(fileName.Data());
         }
     }
 
-    // Validate file counts against expected quantity (8 each)
-    bool flag_electron_count = (electronCount != 8);
-    bool flag_hole_count = (holeCount != 8);
+    // Clean up directory list
+    delete files;
 
-    // Update result flags based on validation
-    if (flag_electron_count) resultFlags |= FLAG_ELECTRON_COUNT;
-    if (flag_hole_count) resultFlags |= FLAG_HOLE_COUNT;
-    if (openErrors) resultFlags |= FLAG_FILE_OPEN;
-    if (unexpectedFiles) resultFlags |= FLAG_UNEXPECTED_FILES;
+    // Set flags based on validation
+    if (result.electronCount != 8) result.flags |= FLAG_ELECTRON_COUNT;
+    if (result.holeCount != 8) result.flags |= FLAG_HOLE_COUNT;
+    if (!result.openErrorFiles.empty()) result.flags |= FLAG_FILE_OPEN;
+    if (!result.unexpectedFiles.empty()) result.flags |= FLAG_UNEXPECTED_FILES;
     
     // Report file counts and validation status
     std::cout << "\n===== Files Status =====" << std::endl;
-    std::cout << "Electron files: " << electronCount << "/8 | "
-              << "Status: " << (flag_electron_count ? "FAIL" : "OK") 
-              << (electronCount < 8 ? " (UNDER)" : (electronCount > 8 ? " (OVER)" : "")) << std::endl;
+    std::cout << "Electron files: " << result.electronCount << "/8 | "
+              << "Status: " << ((result.flags & FLAG_ELECTRON_COUNT) ? "FAIL" : "OK") 
+              << (result.electronCount < 8 ? " (UNDER)" : (result.electronCount > 8 ? " (OVER)" : "")) << std::endl;
               
-    std::cout << "Hole files:     " << holeCount << "/8 | "
-              << "Status: " << (flag_hole_count ? "FAIL" : "OK")
-              << (holeCount < 8 ? " (UNDER)" : (holeCount > 8 ? " (OVER)" : "")) << std::endl;
+    std::cout << "Hole files:     " << result.holeCount << "/8 | "
+              << "Status: " << ((result.flags & FLAG_HOLE_COUNT) ? "FAIL" : "OK")
+              << (result.holeCount < 8 ? " (UNDER)" : (result.holeCount > 8 ? " (OVER)" : "")) << std::endl;
               
-    std::cout << "File accessibility: " << (openErrors ? "ERRORS DETECTED" : "ALL FILES ACCESSIBLE") << std::endl;
+    std::cout << "File accessibility: " << (result.openErrorFiles.empty() ? "ALL OK" : "ERRORS DETECTED") << std::endl;
     
-    // Report unexpected files if any
-    if (unexpectedFiles) {
-        std::cout << "\n===== UNEXPECTED FILES FOUND =====" << std::endl;
-        std::cout << "Files without '_elect.txt' or '_holes.txt' suffix:" << std::endl;
-        
-        TIter nextUnexpected(&unexpectedFileList);
-        TObjString* item;
-        while ((item = (TObjString*)nextUnexpected())) {
-            std::cout << " - " << item->GetString().Data() << std::endl;
+    // Report open errors if any
+    if (!result.openErrorFiles.empty()) {
+        std::cout << "\n===== FILE OPEN ERRORS =====" << std::endl;
+        std::cout << "Files that could not be opened:" << std::endl;
+        for (const auto& filePath : result.openErrorFiles) {
+            std::cout << " - " << filePath << std::endl;
         }
     }
     
-    // Generate summary of issues
+    // Report unexpected files if any
+    if (!result.unexpectedFiles.empty()) {
+        std::cout << "\n===== UNEXPECTED FILES =====" << std::endl;
+        std::cout << "Unexpected files in directory:" << std::endl;
+        for (const auto& fileName : result.unexpectedFiles) {
+            std::cout << " - " << fileName << std::endl;
+        }
+    }
+    
+    // Generate summary
     std::cout << "\nSummary: ";
-    if (!flag_electron_count && !flag_hole_count && !openErrors && !unexpectedFiles) {
+    if (result.flags == 0) {
         std::cout << "ALL CHECKS PASSED";
     } else {
-        if (flag_electron_count) std::cout << "[ELECTRON COUNT] ";
-        if (flag_hole_count) std::cout << "[HOLE COUNT] ";
-        if (openErrors) std::cout << "[FILE ACCESS] ";
-        if (unexpectedFiles) std::cout << "[UNEXPECTED FILES]";
+        if (result.flags & FLAG_ELECTRON_COUNT) std::cout << "[ELECTRON COUNT] ";
+        if (result.flags & FLAG_HOLE_COUNT) std::cout << "[HOLE COUNT] ";
+        if (result.flags & FLAG_FILE_OPEN) std::cout << "[FILE ACCESS] ";
+        if (result.flags & FLAG_UNEXPECTED_FILES) std::cout << "[UNEXPECTED FILES]";
     }
     std::cout << std::endl;
 
-    // Clean up unexpected files list
-    unexpectedFileList.Delete();
-
-    return resultFlags;  // Return combined flags as bitmask
+    return result;
 }

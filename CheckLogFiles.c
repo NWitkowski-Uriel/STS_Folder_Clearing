@@ -16,9 +16,21 @@
 #define FLAG_DATA_INVALID        0x40   // Data file content is invalid
 #define FLAG_UNEXPECTED_FILES    0x80   // Unexpected files in directory
 
-// Global variables to store unexpected files and invalid data files
-std::vector<std::string> g_unexpectedFiles;
-std::vector<std::string> g_invalidDataFiles;
+// Structure to hold detailed results
+struct CheckLogFilesResult {
+    int flags = 0;                      // Bitmask of flags
+    int dataFileCount = 0;              // Total data files found
+    int nonEmptyDataCount = 0;          // Non-empty data files
+    int validDataCount = 0;             // Valid data files
+    bool logExists = false;             // Log file exists
+    bool foundFebFile = false;          // FEB file found
+    
+    // Problematic files
+    std::vector<std::string> openErrorFiles;     // Files that failed to open
+    std::vector<std::string> unexpectedFiles;    // Unexpected files in directory
+    std::vector<std::string> invalidDataFiles;   // Data files with invalid content
+    std::vector<std::string> emptyDataFiles;     // Empty data files
+};
 
 // Helper function to check data file content
 static bool CheckDataFileContent(const char* filePath) {
@@ -48,10 +60,8 @@ static bool CheckDataFileContent(const char* filePath) {
     return false;
 }
 
-int CheckLogFiles(const char* targetDir) {
-    int resultFlags = 0;
-    g_unexpectedFiles.clear();
-    g_invalidDataFiles.clear();
+CheckLogFilesResult CheckLogFiles(const char* targetDir) {
+    CheckLogFilesResult result;
 
     // Get current working directory
     TString currentDir = gSystem->pwd();
@@ -61,27 +71,18 @@ int CheckLogFiles(const char* targetDir) {
     if (gSystem->AccessPathName(fullTargetPath, kFileExists)) {
         std::cerr << "\n===== CRITICAL ERROR =====" << std::endl;
         std::cerr << "Target directory does not exist: " << fullTargetPath << std::endl;
-        resultFlags |= FLAG_DIR_MISSING;
+        result.flags |= FLAG_DIR_MISSING;
         
         // Report status
         std::cout << "\n===== Files Status =====" << std::endl;
         std::cout << "Target directory:    MISSING" << std::endl;
         
-        return resultFlags;
+        return result;
     }
-
-    // Initialize control variables
-    bool logExists = false;
-    bool foundFebFile = false;
-    bool openErrors = false;
-    int dataFileCount = 0;
-    int nonEmptyDataCount = 0;
-    int validDataCount = 0;
-    bool hasUnexpectedFiles = false;
 
     // List of acceptable auxiliary files
     std::vector<TString> acceptableAuxFiles = {
-
+        // Add any acceptable auxiliary files here if needed
     };
 
     // Construct expected log file path
@@ -89,21 +90,27 @@ int CheckLogFiles(const char* targetDir) {
 
     // Check log file
     if (!gSystem->AccessPathName(logFilePath, kFileExists)) {
-        logExists = true;
+        result.logExists = true;
         std::ifstream f_log(logFilePath.Data());
         if (!f_log.is_open()) {
             std::cerr << "Error: Cannot open log file: " << logFilePath << std::endl;
-            openErrors = true;
+            result.openErrorFiles.push_back(logFilePath.Data());
         } else {
             f_log.close();
         }
     } else {
-        resultFlags |= FLAG_LOG_MISSING;
+        result.flags |= FLAG_LOG_MISSING;
     }
 
     // Directory traversal
     TSystemDirectory targetDirObj(targetDir, fullTargetPath);
     TList* files = targetDirObj.GetListOfFiles();
+    if (!files) {
+        std::cerr << "Error: Could not read directory contents: " << fullTargetPath << std::endl;
+        result.flags |= FLAG_FILE_OPEN;
+        return result;
+    }
+
     TSystemFile* file;
     TIter next(files);
 
@@ -120,33 +127,35 @@ int CheckLogFiles(const char* targetDir) {
         // Check for data files
         if (fileName.BeginsWith(targetDir) && fileName.EndsWith("_data.dat")) {
             isExpectedFile = true;
-            dataFileCount++;
+            result.dataFileCount++;
             std::ifstream f_data(fullFilePath.Data(), std::ios::binary | std::ios::ate);
             if (!f_data.is_open()) {
                 std::cerr << "Error: Cannot open data file: " << fullFilePath << std::endl;
-                openErrors = true;
+                result.openErrorFiles.push_back(fullFilePath.Data());
             } else {
                 std::streampos size = f_data.tellg();
                 f_data.close();
                 
                 if (size > 0) {
-                    nonEmptyDataCount++;
-                    if (!CheckDataFileContent(fullFilePath.Data())) {
-                        g_invalidDataFiles.push_back(fileName.Data());
+                    result.nonEmptyDataCount++;
+                    if (CheckDataFileContent(fullFilePath.Data())) {
+                        result.validDataCount++;
                     } else {
-                        validDataCount++;
+                        result.invalidDataFiles.push_back(fullFilePath.Data());
                     }
+                } else {
+                    result.emptyDataFiles.push_back(fullFilePath.Data());
                 }
             }
         }
         // Check for FEB files
         else if (fileName.BeginsWith("tester_febs_")) {
             isExpectedFile = true;
-            foundFebFile = true;
+            result.foundFebFile = true;
             std::ifstream f_feb(fullFilePath.Data());
             if (!f_feb.is_open()) {
                 std::cerr << "Error: Cannot open FEB file: " << fullFilePath << std::endl;
-                openErrors = true;
+                result.openErrorFiles.push_back(fullFilePath.Data());
             } else {
                 f_feb.close();
             }
@@ -167,62 +176,88 @@ int CheckLogFiles(const char* targetDir) {
 
         // Collect unexpected files
         if (!isExpectedFile) {
-            hasUnexpectedFiles = true;
-            g_unexpectedFiles.push_back(fileName.Data());
+            result.unexpectedFiles.push_back(fileName.Data());
         }
     }
 
+    // Clean up directory list
+    delete files;
+
     // Set flags based on validation
-    if (dataFileCount == 0) resultFlags |= FLAG_DATA_MISSING;
-    if (nonEmptyDataCount == 0 && dataFileCount > 0) resultFlags |= FLAG_DATA_EMPTY;
-    if (validDataCount == 0 && nonEmptyDataCount > 0) resultFlags |= FLAG_DATA_INVALID;
-    if (!foundFebFile) resultFlags |= FLAG_NO_FEB_FILE;
-    if (openErrors) resultFlags |= FLAG_FILE_OPEN;
-    if (hasUnexpectedFiles) resultFlags |= FLAG_UNEXPECTED_FILES;
+    if (result.dataFileCount == 0) result.flags |= FLAG_DATA_MISSING;
+    if (result.nonEmptyDataCount == 0 && result.dataFileCount > 0) result.flags |= FLAG_DATA_EMPTY;
+    if (result.validDataCount == 0 && result.nonEmptyDataCount > 0) result.flags |= FLAG_DATA_INVALID;
+    if (!result.foundFebFile) result.flags |= FLAG_NO_FEB_FILE;
+    if (!result.openErrorFiles.empty()) result.flags |= FLAG_FILE_OPEN;
+    if (!result.unexpectedFiles.empty()) result.flags |= FLAG_UNEXPECTED_FILES;
 
     // Report file statuses
     std::cout << "\n===== Files Status =====" << std::endl;
-    std::cout << "Log file:         " << (logExists ? (openErrors ? "EXISTS (OPEN ERROR)" : "EXISTS") : "MISSING") << std::endl;
-    std::cout << "Data files:       " << dataFileCount << " found | " 
-              << ((resultFlags & FLAG_DATA_MISSING) ? "NONE" : 
-                 (resultFlags & FLAG_DATA_EMPTY) ? "ALL EMPTY" :
-                 (resultFlags & FLAG_DATA_INVALID) ? "INVALID CONTENT" : "VALID") << std::endl;
-    std::cout << "Tester FEB files: " << (foundFebFile ? "FOUND" : "NONE") << std::endl;
-    std::cout << "File access:      " << (openErrors ? "ERRORS DETECTED" : "OK") << std::endl;
+    std::cout << "Log file:         " << (result.logExists ? 
+              (std::find(result.openErrorFiles.begin(), result.openErrorFiles.end(), logFilePath.Data()) != result.openErrorFiles.end() ? 
+              "EXISTS (OPEN ERROR)" : "EXISTS") : "MISSING") << std::endl;
+              
+    std::cout << "Data files:       " << result.dataFileCount << " found | " 
+              << ((result.flags & FLAG_DATA_MISSING) ? "NONE" : 
+                 (result.flags & FLAG_DATA_EMPTY) ? "ALL EMPTY" :
+                 (result.flags & FLAG_DATA_INVALID) ? "INVALID CONTENT" : "VALID") << std::endl;
+                 
+    std::cout << "Non-empty files:  " << result.nonEmptyDataCount << "/" << result.dataFileCount << std::endl;
+    std::cout << "Valid files:      " << result.validDataCount << "/" << result.dataFileCount << std::endl;
+    std::cout << "Tester FEB files: " << (result.foundFebFile ? "FOUND" : "NONE") << std::endl;
+    std::cout << "File access:      " << (result.openErrorFiles.empty() ? "OK" : "ERRORS DETECTED") << std::endl;
 
-    // Report invalid data files if any
-    if (!g_invalidDataFiles.empty()) {
-        std::cout << "\n===== Invalid Data Files Found =====" << std::endl;
-        std::cout << "Count: " << g_invalidDataFiles.size() << std::endl;
-        for (const auto& file : g_invalidDataFiles) {
+    // Report empty data files
+    if (!result.emptyDataFiles.empty()) {
+        std::cout << "\n===== Empty Data Files =====" << std::endl;
+        std::cout << "Count: " << result.emptyDataFiles.size() << std::endl;
+        for (const auto& file : result.emptyDataFiles) {
             std::cout << "  - " << file << std::endl;
         }
     }
 
-    // Report unexpected files if any
-    if (hasUnexpectedFiles) {
-        std::cout << "\n===== Unexpected Files Found =====" << std::endl;
-        std::cout << "Count: " << g_unexpectedFiles.size() << std::endl;
-        for (const auto& file : g_unexpectedFiles) {
+    // Report invalid data files
+    if (!result.invalidDataFiles.empty()) {
+        std::cout << "\n===== Invalid Data Files =====" << std::endl;
+        std::cout << "Files with invalid content: " << result.invalidDataFiles.size() << std::endl;
+        for (const auto& file : result.invalidDataFiles) {
             std::cout << "  - " << file << std::endl;
         }
     }
 
-    // Generate summary of issues
+    // Report open errors
+    if (!result.openErrorFiles.empty()) {
+        std::cout << "\n===== File Open Errors =====" << std::endl;
+        std::cout << "Files that could not be opened: " << result.openErrorFiles.size() << std::endl;
+        for (const auto& file : result.openErrorFiles) {
+            std::cout << "  - " << file << std::endl;
+        }
+    }
+
+    // Report unexpected files
+    if (!result.unexpectedFiles.empty()) {
+        std::cout << "\n===== Unexpected Files =====" << std::endl;
+        std::cout << "Count: " << result.unexpectedFiles.size() << std::endl;
+        for (const auto& file : result.unexpectedFiles) {
+            std::cout << "  - " << file << std::endl;
+        }
+    }
+
+    // Generate summary
     std::cout << "\nSummary: ";
-    if (resultFlags == 0) {
+    if (result.flags == 0) {
         std::cout << "ALL CHECKS PASSED";
     } else {
-        if (resultFlags & FLAG_DIR_MISSING) std::cout << "[DIRECTORY MISSING] ";
-        if (resultFlags & FLAG_LOG_MISSING) std::cout << "[LOG MISSING] ";
-        if (resultFlags & FLAG_DATA_MISSING) std::cout << "[DATA MISSING] ";
-        if (resultFlags & FLAG_NO_FEB_FILE) std::cout << "[NO FEB FILES] ";
-        if (resultFlags & FLAG_FILE_OPEN) std::cout << "[FILE OPEN ERROR] ";
-        if (resultFlags & FLAG_DATA_EMPTY) std::cout << "[DATA EMPTY] ";
-        if (resultFlags & FLAG_DATA_INVALID) std::cout << "[DATA INVALID] ";
-        if (resultFlags & FLAG_UNEXPECTED_FILES) std::cout << "[UNEXPECTED FILES] ";
+        if (result.flags & FLAG_DIR_MISSING) std::cout << "[DIRECTORY MISSING] ";
+        if (result.flags & FLAG_LOG_MISSING) std::cout << "[LOG MISSING] ";
+        if (result.flags & FLAG_DATA_MISSING) std::cout << "[DATA MISSING] ";
+        if (result.flags & FLAG_NO_FEB_FILE) std::cout << "[NO FEB FILES] ";
+        if (result.flags & FLAG_FILE_OPEN) std::cout << "[FILE OPEN ERROR] ";
+        if (result.flags & FLAG_DATA_EMPTY) std::cout << "[DATA EMPTY] ";
+        if (result.flags & FLAG_DATA_INVALID) std::cout << "[DATA INVALID] ";
+        if (result.flags & FLAG_UNEXPECTED_FILES) std::cout << "[UNEXPECTED FILES] ";
     }
     std::cout << std::endl;
 
-    return resultFlags;
+    return result;
 }

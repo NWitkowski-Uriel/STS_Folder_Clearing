@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <string>
 #include "TSystem.h"
 #include "TSystemDirectory.h"
 #include "TFile.h"
@@ -18,13 +19,29 @@
 #define FLAG_MODULE_PDF            0x200  // Module test pdf file error
 #define FLAG_UNEXPECTED_FILES      0x400  // Unexpected files in directory
 
-int CheckPscanFiles(const char* targetDir) {
-    int resultFlags = 0;  // Initialize flag container (bitmask)
+// Structure to hold detailed results
+struct CheckPscanFilesResult {
+    int flags = 0;                      // Bitmask of flags
+    
+    // File counts
+    int electronTxtCount = 0;
+    int holeTxtCount = 0;
+    int electronRootCount = 0;
+    int holeRootCount = 0;
+    
+    // Problematic files
+    std::vector<std::string> openErrorFiles;      // Files that failed to open
+    std::vector<std::string> unexpectedFiles;     // Unexpected files in directory
+    std::vector<std::string> moduleErrorFiles;    // Module test files with errors
+};
+
+CheckPscanFilesResult CheckPscanFiles(const char* targetDir) {
+    CheckPscanFilesResult result;  // Initialize result structure
 
     // Get current working directory
     TString currentDir = gSystem->pwd();
     
-    // Construct full path to target directory (assumed to exist)
+    // Construct full path to target directory
     TString fullTargetPath = TString::Format("%s/%s", currentDir.Data(), targetDir);
     
     // Construct full path to pscan_files directory
@@ -37,29 +54,23 @@ int CheckPscanFiles(const char* targetDir) {
         std::cerr << "Target folder: " << fullTargetPath << std::endl;
         std::cerr << "Expected path: " << pscanDirPath << std::endl;
         
-        // Set flag and return
-        resultFlags |= FLAG_PSCAN_FOLDER_MISSING;
-
-        return resultFlags;
+        result.flags |= FLAG_PSCAN_FOLDER_MISSING;
+        return result;
     }
 
-    // ===== Check module_test files in pscan_files directory =====
+    // ===== Check module_test files =====
     TString moduleRoot = TString::Format("%s/module_test_%s.root", pscanDirPath.Data(), targetDir);
     TString moduleTxt = TString::Format("%s/module_test_%s.txt", pscanDirPath.Data(), targetDir);
     TString modulePdf = TString::Format("%s/module_test_%s.pdf", pscanDirPath.Data(), targetDir);
 
-    bool moduleRootError = false;
-    bool moduleTxtError = false;
-    bool modulePdfError = false;
-
     // Check module_test ROOT
     if (gSystem->AccessPathName(moduleRoot, kFileExists)) {
-        moduleRootError = true;
+        result.moduleErrorFiles.push_back(moduleRoot.Data());
         std::cerr << "Error: Module test root file does not exist: " << moduleRoot << std::endl;
     } else {
         TFile* f_root = TFile::Open(moduleRoot, "READ");
         if (!f_root || f_root->IsZombie()) {
-            moduleRootError = true;
+            result.moduleErrorFiles.push_back(moduleRoot.Data());
             std::cerr << "Error: Cannot open module test root file: " << moduleRoot << std::endl;
         }
         if (f_root) f_root->Close();
@@ -67,12 +78,12 @@ int CheckPscanFiles(const char* targetDir) {
 
     // Check module_test TXT
     if (gSystem->AccessPathName(moduleTxt, kFileExists)) {
-        moduleTxtError = true;
+        result.moduleErrorFiles.push_back(moduleTxt.Data());
         std::cerr << "Error: Module test txt file does not exist: " << moduleTxt << std::endl;
     } else {
         std::ifstream f_txt(moduleTxt.Data());
         if (!f_txt.is_open()) {
-            moduleTxtError = true;
+            result.moduleErrorFiles.push_back(moduleTxt.Data());
             std::cerr << "Error: Cannot open module test txt file: " << moduleTxt << std::endl;
         } else {
             f_txt.close();
@@ -81,35 +92,36 @@ int CheckPscanFiles(const char* targetDir) {
 
     // Check module_test PDF (existence only)
     if (gSystem->AccessPathName(modulePdf, kFileExists)) {
-        modulePdfError = true;
+        result.moduleErrorFiles.push_back(modulePdf.Data());
         std::cerr << "Error: Module test pdf file does not exist: " << modulePdf << std::endl;
     }
 
     // Set flags for module_test errors
-    if (moduleRootError) resultFlags |= FLAG_MODULE_ROOT;
-    if (moduleTxtError) resultFlags |= FLAG_MODULE_TXT;
-    if (modulePdfError) resultFlags |= FLAG_MODULE_PDF;
+    if (!result.moduleErrorFiles.empty()) {
+        for (const auto& file : result.moduleErrorFiles) {
+            if (file.find(".root") != std::string::npos) result.flags |= FLAG_MODULE_ROOT;
+            if (file.find(".txt") != std::string::npos) result.flags |= FLAG_MODULE_TXT;
+            if (file.find(".pdf") != std::string::npos) result.flags |= FLAG_MODULE_PDF;
+        }
+    }
 
     // Attempt to access directory contents
     TSystemDirectory pscanDir("pscan_files", pscanDirPath);
     TList* files = pscanDir.GetListOfFiles();
-
-    // Initialize counters for validation
-    int electronTxtCount = 0;    // Tracks electron text files
-    int holeTxtCount = 0;        // Tracks hole text files
-    int electronRootCount = 0;    // Tracks electron ROOT files
-    int holeRootCount = 0;        // Tracks hole ROOT files
-    bool openErrors = false;      // Flags file access issues
     
+    // Handle directory access failure
+    if (!files) {
+        std::cerr << "Error: Could not read directory contents: " << pscanDirPath << std::endl;
+        result.flags |= FLAG_DIR_ACCESS;
+        return result;
+    }
+
     // List of acceptable auxiliary files
-    std::vector<TString> acceptableAuxFiles = {
+    std::vector<std::string> acceptableAuxFiles = {
         "module_test_SETUP.root",
         "module_test_SETUP.txt",
         "module_test_SETUP.pdf"
     };
-    
-    // List to collect unexpected files
-    std::vector<TString> unexpectedFiles;
 
     // Iterate through all directory entries
     TSystemFile* file;
@@ -123,62 +135,57 @@ int CheckPscanFiles(const char* targetDir) {
         // Construct full file path
         TString filePath = TString::Format("%s/%s", pscanDirPath.Data(), fileName.Data());
 
-        // Process electron text files (expected suffix: '_elect.txt')
+        // Process electron text files
         if (fileName.EndsWith("_elect.txt")) {
-            electronTxtCount++;
+            result.electronTxtCount++;
             std::ifstream f_test(filePath.Data());
             if (!f_test.is_open()) {
+                result.openErrorFiles.push_back(filePath.Data());
                 std::cerr << "Error: Cannot open electron txt file: " << filePath << std::endl;
-                openErrors = true;
             } else {
-                f_test.close();  // Properly close accessible files
+                f_test.close();
             }
         }
-        // Process hole text files (expected suffix: '_holes.txt')
+        // Process hole text files
         else if (fileName.EndsWith("_holes.txt")) {
-            holeTxtCount++;
+            result.holeTxtCount++;
             std::ifstream f_test(filePath.Data());
             if (!f_test.is_open()) {
+                result.openErrorFiles.push_back(filePath.Data());
                 std::cerr << "Error: Cannot open hole txt file: " << filePath << std::endl;
-                openErrors = true;
             } else {
-                f_test.close();  // Properly close accessible files
+                f_test.close();
             }
         }
-        // Process electron ROOT files (expected suffix: '_elect.root')
+        // Process electron ROOT files
         else if (fileName.EndsWith("_elect.root")) {
-            electronRootCount++;
-            // Use ROOT's TFile for proper ROOT file validation
+            result.electronRootCount++;
             TFile* rootFile = TFile::Open(filePath, "READ");
             if (!rootFile || rootFile->IsZombie()) {
+                result.openErrorFiles.push_back(filePath.Data());
                 std::cerr << "Error: Cannot open electron root file: " << filePath << std::endl;
-                openErrors = true;
             }
-            // Clean up resources if file was opened
             if (rootFile) rootFile->Close();
         }
-        // Process hole ROOT files (expected suffix: '_holes.root')
+        // Process hole ROOT files
         else if (fileName.EndsWith("_holes.root")) {
-            holeRootCount++;
-            // Use ROOT's TFile for proper ROOT file validation
+            result.holeRootCount++;
             TFile* rootFile = TFile::Open(filePath, "READ");
             if (!rootFile || rootFile->IsZombie()) {
+                result.openErrorFiles.push_back(filePath.Data());
                 std::cerr << "Error: Cannot open hole root file: " << filePath << std::endl;
-                openErrors = true;
             }
-            // Clean up resources if file was opened
             if (rootFile) rootFile->Close();
         }
-        // Check for unexpected files
+        // Handle unexpected files
         else {
-            // Check against module test files
+            // Check if file is acceptable
             TString modulePrefix = TString::Format("module_test_%s", targetDir);
             bool isModuleFile = fileName.BeginsWith(modulePrefix) && 
                                (fileName.EndsWith(".root") || 
                                 fileName.EndsWith(".txt") || 
                                 fileName.EndsWith(".pdf"));
             
-            // Check against acceptable auxiliary files
             bool isAcceptable = false;
             for (const auto& auxFile : acceptableAuxFiles) {
                 if (fileName == auxFile) {
@@ -187,82 +194,90 @@ int CheckPscanFiles(const char* targetDir) {
                 }
             }
             
-            // Collect unexpected files
             if (!isModuleFile && !isAcceptable) {
-                unexpectedFiles.push_back(fileName);
+                result.unexpectedFiles.push_back(fileName.Data());
             }
         }
     }
 
-    // Validate file counts against expected quantity (8 each)
-    bool flag_electron_txt = (electronTxtCount != 8);
-    bool flag_hole_txt = (holeTxtCount != 8);
-    bool flag_electron_root = (electronRootCount != 8);
-    bool flag_hole_root = (holeRootCount != 8);
+    // Clean up directory list
+    delete files;
+
+    // Set flags based on counts
+    if (result.electronTxtCount != 8) result.flags |= FLAG_ELECTRON_TXT;
+    if (result.holeTxtCount != 8) result.flags |= FLAG_HOLE_TXT;
+    if (result.electronRootCount != 8) result.flags |= FLAG_ELECTRON_ROOT;
+    if (result.holeRootCount != 8) result.flags |= FLAG_HOLE_ROOT;
+    if (!result.openErrorFiles.empty()) result.flags |= FLAG_FILE_OPEN;
+    if (!result.unexpectedFiles.empty()) result.flags |= FLAG_UNEXPECTED_FILES;
     
-    // Set flag if unexpected files found
-    bool flag_unexpected_files = !unexpectedFiles.empty();
-
-    // Update result flags based on validation
-    if (flag_electron_txt) resultFlags |= FLAG_ELECTRON_TXT;
-    if (flag_hole_txt) resultFlags |= FLAG_HOLE_TXT;
-    if (flag_electron_root) resultFlags |= FLAG_ELECTRON_ROOT;
-    if (flag_hole_root) resultFlags |= FLAG_HOLE_ROOT;
-    if (openErrors) resultFlags |= FLAG_FILE_OPEN;
-    if (flag_unexpected_files) resultFlags |= FLAG_UNEXPECTED_FILES;
-
-    // Report module_test status
+    // Report file status
     std::cout << "\n===== Files Status =====" << std::endl;
-
-    // Report file counts and validation status
-    std::cout << "Electron text files: " << electronTxtCount << "/8 | "
-              << "Status: " << (flag_electron_txt ? "FAIL" : "OK") 
-              << (electronTxtCount < 8 ? " (UNDER)" : (electronTxtCount > 8 ? " (OVER)" : "")) << std::endl;
+    std::cout << "Electron text files: " << result.electronTxtCount << "/8 | "
+              << "Status: " << ((result.flags & FLAG_ELECTRON_TXT) ? "FAIL" : "OK") 
+              << (result.electronTxtCount < 8 ? " (UNDER)" : (result.electronTxtCount > 8 ? " (OVER)" : "")) << std::endl;
               
-    std::cout << "Hole text files:     " << holeTxtCount << "/8 | "
-              << "Status: " << (flag_hole_txt ? "FAIL" : "OK")
-              << (holeTxtCount < 8 ? " (UNDER)" : (holeTxtCount > 8 ? " (OVER)" : "")) << std::endl;
+    std::cout << "Hole text files:     " << result.holeTxtCount << "/8 | "
+              << "Status: " << ((result.flags & FLAG_HOLE_TXT) ? "FAIL" : "OK")
+              << (result.holeTxtCount < 8 ? " (UNDER)" : (result.holeTxtCount > 8 ? " (OVER)" : "")) << std::endl;
               
-    std::cout << "Electron ROOT files: " << electronRootCount << "/8 | "
-              << "Status: " << (flag_electron_root ? "FAIL" : "OK")
-              << (electronRootCount < 8 ? " (UNDER)" : (electronRootCount > 8 ? " (OVER)" : "")) << std::endl;
+    std::cout << "Electron ROOT files: " << result.electronRootCount << "/8 | "
+              << "Status: " << ((result.flags & FLAG_ELECTRON_ROOT) ? "FAIL" : "OK")
+              << (result.electronRootCount < 8 ? " (UNDER)" : (result.electronRootCount > 8 ? " (OVER)" : "")) << std::endl;
               
-    std::cout << "Hole ROOT files:     " << holeRootCount << "/8 | "
-              << "Status: " << (flag_hole_root ? "FAIL" : "OK")
-              << (holeRootCount < 8 ? " (UNDER)" : (holeRootCount > 8 ? " (OVER)" : "")) << std::endl;
+    std::cout << "Hole ROOT files:     " << result.holeRootCount << "/8 | "
+              << "Status: " << ((result.flags & FLAG_HOLE_ROOT) ? "FAIL" : "OK")
+              << (result.holeRootCount < 8 ? " (UNDER)" : (result.holeRootCount > 8 ? " (OVER)" : "")) << std::endl;
               
-    std::cout << "Module test root:  " << (moduleRootError ? "MISSING/ERROR" : "OK") << std::endl;
-    std::cout << "Module test txt:   " << (moduleTxtError ? "MISSING/ERROR" : "OK") << std::endl;
-    std::cout << "Module test pdf:   " << (modulePdfError ? "MISSING" : "OK") << std::endl;
-    std::cout << "File accessibility:    " << (openErrors ? "ERRORS DETECTED" : "ALL FILES ACCESSIBLE") << std::endl;
+    // Report module test status
+    std::cout << "Module test root:  " << (result.flags & FLAG_MODULE_ROOT ? "ERROR" : "OK") << std::endl;
+    std::cout << "Module test txt:   " << (result.flags & FLAG_MODULE_TXT ? "ERROR" : "OK") << std::endl;
+    std::cout << "Module test pdf:   " << (result.flags & FLAG_MODULE_PDF ? "MISSING" : "OK") << std::endl;
+    std::cout << "File accessibility:    " << (result.openErrorFiles.empty() ? "ALL OK" : "ERRORS DETECTED") << std::endl;
     
-    // Report unexpected files if any
-    if (!unexpectedFiles.empty()) {
-        std::cout << "\n===== Unexpected Files Found =====" << std::endl;
-        std::cout << "Number of unexpected files: " << unexpectedFiles.size() << std::endl;
-        for (const auto& file : unexpectedFiles) {
-            std::cout << "  - " << file << std::endl;
+    // Report open errors if any
+    if (!result.openErrorFiles.empty()) {
+        std::cout << "\n===== FILE OPEN ERRORS =====" << std::endl;
+        std::cout << "Files that could not be opened:" << std::endl;
+        for (const auto& filePath : result.openErrorFiles) {
+            std::cout << " - " << filePath << std::endl;
         }
     }
     
-    // Generate summary of issues
+    // Report module errors if any
+    if (!result.moduleErrorFiles.empty()) {
+        std::cout << "\n===== MODULE TEST ERRORS =====" << std::endl;
+        std::cout << "Problematic module test files:" << std::endl;
+        for (const auto& filePath : result.moduleErrorFiles) {
+            std::cout << " - " << filePath << std::endl;
+        }
+    }
+    
+    // Report unexpected files if any
+    if (!result.unexpectedFiles.empty()) {
+        std::cout << "\n===== UNEXPECTED FILES =====" << std::endl;
+        std::cout << "Unexpected files in directory:" << std::endl;
+        for (const auto& fileName : result.unexpectedFiles) {
+            std::cout << " - " << fileName << std::endl;
+        }
+    }
+    
+    // Generate summary
     std::cout << "\nSummary: ";
-    if (!flag_electron_txt && !flag_hole_txt && !flag_electron_root && 
-        !flag_hole_root && !openErrors && !moduleTxtError && 
-        !moduleRootError && !modulePdfError && !flag_unexpected_files) {
+    if (result.flags == 0) {
         std::cout << "ALL CHECKS PASSED";
     } else {
-        if (flag_electron_txt) std::cout << "[ELECTRON TXT COUNT] ";
-        if (flag_hole_txt) std::cout << "[HOLE TXT COUNT] ";
-        if (flag_electron_root) std::cout << "[ELECTRON ROOT COUNT] ";
-        if (flag_hole_root) std::cout << "[HOLE ROOT COUNT] ";
-        if (openErrors) std::cout << "[FILE ACCESS ISSUES] ";
-        if (moduleTxtError) std::cout << "[MODULE TXT] ";
-        if (moduleRootError) std::cout << "[MODULE ROOT] ";
-        if (modulePdfError) std::cout << "[MODULE PDF] ";
-        if (flag_unexpected_files) std::cout << "[UNEXPECTED FILES] ";
+        if (result.flags & FLAG_ELECTRON_TXT) std::cout << "[ELECTRON TXT COUNT] ";
+        if (result.flags & FLAG_HOLE_TXT) std::cout << "[HOLE TXT COUNT] ";
+        if (result.flags & FLAG_ELECTRON_ROOT) std::cout << "[ELECTRON ROOT COUNT] ";
+        if (result.flags & FLAG_HOLE_ROOT) std::cout << "[HOLE ROOT COUNT] ";
+        if (result.flags & FLAG_FILE_OPEN) std::cout << "[FILE ACCESS] ";
+        if (result.flags & FLAG_MODULE_ROOT) std::cout << "[MODULE ROOT] ";
+        if (result.flags & FLAG_MODULE_TXT) std::cout << "[MODULE TXT] ";
+        if (result.flags & FLAG_MODULE_PDF) std::cout << "[MODULE PDF] ";
+        if (result.flags & FLAG_UNEXPECTED_FILES) std::cout << "[UNEXPECTED FILES] ";
     }
     std::cout << std::endl;
 
-    return resultFlags;  // Return combined flags as bitmask
+    return result;
 }
