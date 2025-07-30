@@ -103,16 +103,6 @@ int CheckPscanFiles(const char* targetDir) {
     
     // List of acceptable auxiliary files
     std::vector<TString> acceptableAuxFiles = {
-        "a.txt",
-        "find_ASICs.sh",
-        "count_select_sort_files.sh",
-        "count_select_sort_root_files.sh",     
-        "execution.C",
-        "plot.txt",
-        "plot_1024.C",
-        "plot_1024_Maria.C",
-        "trim_adc.cxx",
-        "trim_adc.hxx",
         "module_test_SETUP.root",
         "module_test_SETUP.txt",
         "module_test_SETUP.pdf"
