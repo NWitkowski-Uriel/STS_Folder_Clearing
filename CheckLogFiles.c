@@ -16,8 +16,9 @@
 #define FLAG_DATA_INVALID        0x40   // Data file content is invalid
 #define FLAG_UNEXPECTED_FILES    0x80   // Unexpected files in directory
 
-// Global variable to store unexpected files
+// Global variables to store unexpected files and invalid data files
 std::vector<std::string> g_unexpectedFiles;
+std::vector<std::string> g_invalidDataFiles;
 
 // Helper function to check data file content
 static bool CheckDataFileContent(const char* filePath) {
@@ -50,6 +51,7 @@ static bool CheckDataFileContent(const char* filePath) {
 int CheckLogFiles(const char* targetDir) {
     int resultFlags = 0;
     g_unexpectedFiles.clear();
+    g_invalidDataFiles.clear();
 
     // Get current working directory
     TString currentDir = gSystem->pwd();
@@ -144,7 +146,9 @@ int CheckLogFiles(const char* targetDir) {
                 
                 if (size > 0) {
                     nonEmptyDataCount++;
-                    if (CheckDataFileContent(fullFilePath.Data())) {
+                    if (!CheckDataFileContent(fullFilePath.Data())) {
+                        g_invalidDataFiles.push_back(fileName.Data());
+                    } else {
                         validDataCount++;
                     }
                 }
@@ -200,6 +204,15 @@ int CheckLogFiles(const char* targetDir) {
                  (resultFlags & FLAG_DATA_INVALID) ? "INVALID CONTENT" : "VALID") << std::endl;
     std::cout << "Tester FEB files: " << (foundFebFile ? "FOUND" : "NONE") << std::endl;
     std::cout << "File access:      " << (openErrors ? "ERRORS DETECTED" : "OK") << std::endl;
+
+    // Report invalid data files if any
+    if (!g_invalidDataFiles.empty()) {
+        std::cout << "\n===== Invalid Data Files Found =====" << std::endl;
+        std::cout << "Count: " << g_invalidDataFiles.size() << std::endl;
+        for (const auto& file : g_invalidDataFiles) {
+            std::cout << "  - " << file << std::endl;
+        }
+    }
 
     // Report unexpected files if any
     if (hasUnexpectedFiles) {
