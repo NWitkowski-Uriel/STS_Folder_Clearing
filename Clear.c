@@ -65,51 +65,10 @@
 #define CONN_FLAG_UNEXPECTED_FILES       0x20
 
 // Forward declarations of result structures
-struct CheckLogFilesResult {
-    int flags = 0;
-    int dataFileCount = 0;
-    int nonEmptyDataCount = 0;
-    int validDataCount = 0;
-    bool logExists = false;
-    bool foundFebFile = false;
-    std::vector<std::string> openErrorFiles;
-    std::vector<std::string> unexpectedFiles;
-    std::vector<std::string> invalidDataFiles;
-    std::vector<std::string> emptyDataFiles;
-};
-
-struct CheckTrimFilesResult {
-    int flags = 0;
-    int electronCount = 0;
-    int holeCount = 0;
-    std::vector<std::string> openErrorFiles;
-    std::vector<std::string> unexpectedFiles;
-};
-
-struct CheckPscanFilesResult {
-    int flags = 0;
-    int electronTxtCount = 0;
-    int holeTxtCount = 0;
-    int electronRootCount = 0;
-    int holeRootCount = 0;
-    std::vector<std::string> openErrorFiles;
-    std::vector<std::string> unexpectedFiles;
-    std::vector<std::string> moduleErrorFiles;
-};
-
-struct CheckConnFilesResult {
-    int flags = 0;
-    int electronCount = 0;
-    int holeCount = 0;
-    std::vector<std::string> openErrorFiles;
-    std::vector<std::string> unexpectedFiles;
-};
-
-// Function pointer types
-typedef CheckLogFilesResult (*CheckLogFunction)(const char*);
-typedef CheckTrimFilesResult (*CheckTrimFunction)(const char*);
-typedef CheckPscanFilesResult (*CheckPscanFunction)(const char*);
-typedef CheckConnFilesResult (*CheckConnFunction)(const char*);
+struct CheckLogFilesResult;
+struct CheckTrimFilesResult;
+struct CheckPscanFilesResult;
+struct CheckConnFilesResult;
 
 // Global variables
 std::vector<std::string> gReportPages;
@@ -416,62 +375,37 @@ void Clear() {
         return;
     }
 
-    // Sprawdź dostępność programów (tylko źródła)
-    bool logAvailable = (gSystem->AccessPathName("CheckLogFiles.c") == 0);
-    bool trimAvailable = (gSystem->AccessPathName("CheckTrimFiles.c") == 0);
-    bool pscanAvailable = (gSystem->AccessPathName("CheckPscanFiles.c") == 0);
-    bool connAvailable = (gSystem->AccessPathName("CheckConnFiles.c") == 0);
+    // Check available programs
+    bool useExecutableLog = (gSystem->AccessPathName("CheckLogFiles") == 0);
+    bool useSourceLog = (gSystem->AccessPathName("CheckLogFiles.c") == 0);
+    bool logAvailable = useExecutableLog || useSourceLog;
+
+    bool useExecutableTrim = (gSystem->AccessPathName("CheckTrimFiles") == 0);
+    bool useSourceTrim = (gSystem->AccessPathName("CheckTrimFiles.c") == 0);
+    bool trimAvailable = useExecutableTrim || useSourceTrim;
+
+    bool useExecutablePscan = (gSystem->AccessPathName("CheckPscanFiles") == 0);
+    bool useSourcePscan = (gSystem->AccessPathName("CheckPscanFiles.c") == 0);
+    bool pscanAvailable = useExecutablePscan || useSourcePscan;
+    
+    bool useExecutableConn = (gSystem->AccessPathName("CheckConnFiles") == 0);
+    bool useSourceConn = (gSystem->AccessPathName("CheckConnFiles.c") == 0);
+    bool connAvailable = useExecutableConn || useSourceConn;
 
     if (!logAvailable && !trimAvailable && !pscanAvailable && !connAvailable) {
         std::cerr << "Error: No valid programs found!" << std::endl;
         return;
     }
 
-    // Przygotuj wskaźniki funkcji
-    CheckLogFunction logFuncPtr = nullptr;
-    CheckTrimFunction trimFuncPtr = nullptr;
-    CheckPscanFunction pscanFuncPtr = nullptr;
-    CheckConnFunction connFuncPtr = nullptr;
-
-    if (logAvailable) {
-        gInterpreter->ProcessLine(".L CheckLogFiles.c+");
-        logFuncPtr = (CheckLogFunction)gInterpreter->ProcessLine("CheckLogFiles;");
-        if (!logFuncPtr) {
-            std::cerr << "Error loading CheckLogFiles function!" << std::endl;
-            logAvailable = false;
-        }
-    }
-
-    if (trimAvailable) {
-        gInterpreter->ProcessLine(".L CheckTrimFiles.c+");
-        trimFuncPtr = (CheckTrimFunction)gInterpreter->ProcessLine("CheckTrimFiles;");
-        if (!trimFuncPtr) {
-            std::cerr << "Error loading CheckTrimFiles function!" << std::endl;
-            trimAvailable = false;
-        }
-    }
-    
-    if (pscanAvailable) {
-        gInterpreter->ProcessLine(".L CheckPscanFiles.c+");
-        pscanFuncPtr = (CheckPscanFunction)gInterpreter->ProcessLine("CheckPscanFiles;");
-        if (!pscanFuncPtr) {
-            std::cerr << "Error loading CheckPscanFiles function!" << std::endl;
-            pscanAvailable = false;
-        }
-    }
-    
-    if (connAvailable) {
-        gInterpreter->ProcessLine(".L CheckConnFiles.c+");
-        connFuncPtr = (CheckConnFunction)gInterpreter->ProcessLine("CheckConnFiles;");
-        if (!connFuncPtr) {
-            std::cerr << "Error loading CheckConnFiles function!" << std::endl;
-            connAvailable = false;
-        }
-    }
+    // Load macros if needed
+    if (useSourceLog) gInterpreter->ProcessLine(".L CheckLogFiles.c+");
+    if (useSourceTrim) gInterpreter->ProcessLine(".L CheckTrimFiles.c+");
+    if (useSourcePscan) gInterpreter->ProcessLine(".L CheckPscanFiles.c+");
+    if (useSourceConn) gInterpreter->ProcessLine(".L CheckConnFiles.c+");
 
     int totalDirs = dirNames.size();
 
-    // Główna pętla walidacji
+    // Main validation loop
     for (auto& dir : dirNames) {
         capture.clear();
         
@@ -485,39 +419,63 @@ void Clear() {
         std::cout << "VALIDATING DIRECTORY: " << dir << std::endl;
         std::cout << "====================================================" << std::endl;
 
-        // Uruchom CheckLogFiles
-        if (logAvailable && logFuncPtr) {
-            std::cout << "\n[1/4] RUNNING: CheckLogFiles for " << dir << std::endl;
-            CheckLogFilesResult result = logFuncPtr(dir.Data());
-            logFlags = result.flags;
+        // Run CheckLogFiles
+        if (logAvailable) {
+            if (useExecutableLog) {
+                TString command = TString::Format("./CheckLogFiles \"%s\"", dir.Data());
+                std::cout << "\n[1/4] EXEC: " << command << std::endl;
+                logFlags = gSystem->Exec(command);
+            } else if (useSourceLog) {
+                std::cout << "\n[1/4] Running CheckLogFiles macro..." << std::endl;
+                gInterpreter->ProcessLine(TString::Format("auto result_log = CheckLogFiles(\"%s\");", dir.Data()));
+                logFlags = gInterpreter->ProcessLine("result_log.flags;");
+            }
             if (logFlags != 0) dirPassed = false;
         }
         
-        // Uruchom CheckTrimFiles
-        if (trimAvailable && trimFuncPtr) {
-            std::cout << "\n[2/4] RUNNING: CheckTrimFiles for " << dir << std::endl;
-            CheckTrimFilesResult result = trimFuncPtr(dir.Data());
-            trimFlags = result.flags;
+        // Run CheckTrimFiles
+        if (trimAvailable) {
+            if (useExecutableTrim) {
+                TString command = TString::Format("./CheckTrimFiles \"%s\"", dir.Data());
+                std::cout << "\n[2/4] EXEC: " << command << std::endl;
+                trimFlags = gSystem->Exec(command);
+            } else if (useSourceTrim) {
+                std::cout << "\n[2/4] Running CheckTrimFiles macro..." << std::endl;
+                gInterpreter->ProcessLine(TString::Format("auto result_trim = CheckTrimFiles(\"%s\");", dir.Data()));
+                trimFlags = gInterpreter->ProcessLine("result_trim.flags;");
+            }
             if (trimFlags != 0) dirPassed = false;
         }
 
-        // Uruchom CheckPscanFiles
-        if (pscanAvailable && pscanFuncPtr) {
-            std::cout << "\n[3/4] RUNNING: CheckPscanFiles for " << dir << std::endl;
-            CheckPscanFilesResult result = pscanFuncPtr(dir.Data());
-            pscanFlags = result.flags;
+        // Run CheckPscanFiles
+        if (pscanAvailable) {
+            if (useExecutablePscan) {
+                TString command = TString::Format("./CheckPscanFiles \"%s\"", dir.Data());
+                std::cout << "\n[3/4] EXEC: " << command << std::endl;
+                pscanFlags = gSystem->Exec(command);
+            } else if (useSourcePscan) {
+                std::cout << "\n[3/4] Running CheckPscanFiles macro..." << std::endl;
+                gInterpreter->ProcessLine(TString::Format("auto result_pscan = CheckPscanFiles(\"%s\");", dir.Data()));
+                pscanFlags = gInterpreter->ProcessLine("result_pscan.flags;");
+            }
             if (pscanFlags != 0) dirPassed = false;
         }
         
-        // Uruchom CheckConnFiles
-        if (connAvailable && connFuncPtr) {
-            std::cout << "\n[4/4] RUNNING: CheckConnFiles for " << dir << std::endl;
-            CheckConnFilesResult result = connFuncPtr(dir.Data());
-            connFlags = result.flags;
+        // Run CheckConnFiles
+        if (connAvailable) {
+            if (useExecutableConn) {
+                TString command = TString::Format("./CheckConnFiles \"%s\"", dir.Data());
+                std::cout << "\n[4/4] EXEC: " << command << std::endl;
+                connFlags = gSystem->Exec(command);
+            } else if (useSourceConn) {
+                std::cout << "\n[4/4] Running CheckConnFiles macro..." << std::endl;
+                gInterpreter->ProcessLine(TString::Format("auto result_conn = CheckConnFiles(\"%s\");", dir.Data()));
+                connFlags = gInterpreter->ProcessLine("result_conn.flags;");
+            }
             if (connFlags != 0) dirPassed = false;
         }
 
-        // Generuj raport dla katalogu
+        // Generate directory report
         std::cout << "\n====================================================" << std::endl;
         std::cout << "VALIDATION REPORT FOR: " << dir << std::endl;
         std::cout << "====================================================" << std::endl;
@@ -551,15 +509,15 @@ void Clear() {
                   << std::endl;
         std::cout << "====================================================\n" << std::endl;
 
-        // Aktualizuj statystyki
+        // Update statistics
         if (dirPassed) gPassedDirs++;
         else gFailedDirs++;
 
-        // Zapisz raport dla tego katalogu
+        // Store this directory's report
         gReportPages.push_back(capture.getOutput());
     }
 
-    // Generuj globalne podsumowanie
+    // Generate global summary
     std::stringstream summary;
     summary << "\n\n====================================================" << std::endl;
     summary << "LADDER " << currentDir  << " VALIDATION SUMMARY" << std::endl;
@@ -575,7 +533,7 @@ void Clear() {
     gGlobalSummary = summary.str();
     std::cout << gGlobalSummary << std::endl;
 
-    // Zapisz raporty z nazwą bieżącego katalogu
+    // Save reports with current directory name
     std::string reportBaseName = "ValidationReport_" + std::string(currentDir.Data());
     SaveTxtReport(reportBaseName + ".txt");
     SaveRootReport(reportBaseName + ".root");
