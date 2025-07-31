@@ -17,6 +17,10 @@
 #include <TCanvas.h>
 #include <TLatex.h>
 #include <TPie.h>
+#include <TLegend.h>
+#include <TObjString.h>
+#include <TInterpreter.h>
+#include <TPaveText.h>
 
 // ===================================================================
 // Global Constants and Structures
@@ -991,7 +995,131 @@ void SaveTxtReport() {
     
     out << gState.globalSummary << std::endl;
     out.close();
-    std::cout << "Report saved to: " << filename << std::endl;
+    std::cout << "Text report saved to: " << filename << std::endl;
+}
+
+void SaveRootReport() {
+    TString filename = "ExorcismReport_" + gState.currentLadder + ".root";
+    TFile file(filename, "RECREATE");
+    
+    for (size_t i = 0; i < gState.reportPages.size(); i++) {
+        TString name = TString::Format("Directory_%zu", i);
+        TObjString obj(gState.reportPages[i].c_str());
+        obj.Write(name);
+    }
+    
+    TObjString summary(gState.globalSummary.c_str());
+    summary.Write("GlobalSummary");
+    file.Close();
+    std::cout << "ROOT report saved to: " << filename << std::endl;
+}
+
+void SavePdfReport() {
+    TString filename = "ExorcismReport_" + TString(gState.currentLadder) + ".pdf";
+    TCanvas canvas("canvas", "Validation Report", 1200, 1600);
+    canvas.Print(filename + "[");
+    
+    // Title page
+    canvas.Clear();
+    canvas.cd();
+    
+    // Title
+    TLatex title(0.5, 0.7, "EXORCISM VALIDATION REPORT");
+    title.SetTextAlign(22);
+    title.SetTextSize(0.06);
+    title.SetTextColor(kBlue);
+    title.Draw();
+    
+    // Ladder name
+    TLatex ladder(0.5, 0.6, TString::Format("Ladder: %s", TString(gState.currentLadder).Data()));
+    ladder.SetTextAlign(22);
+    ladder.SetTextSize(0.05);
+    ladder.Draw();
+    
+    // Date and time
+    TLatex date(0.5, 0.5, TString::Format("Generated: %s %s", __DATE__, __TIME__));
+    date.SetTextAlign(22);
+    date.SetTextSize(0.04);
+    date.Draw();
+    
+    canvas.Print(filename);
+    
+    // Directory reports
+    for (const auto& report : gState.reportPages) {
+        canvas.Clear();
+        canvas.cd();
+        
+        TPaveText textBox(0.05, 0.05, 0.95, 0.95);
+        textBox.SetTextAlign(12);
+        textBox.SetTextSize(0.025);
+        textBox.SetFillColor(0);
+        textBox.SetBorderSize(1);
+        
+        std::istringstream stream(report);
+        std::string line;
+        while (std::getline(stream, line)) {
+            if (line.find("FAILED") != std::string::npos) {
+                textBox.AddText(line.c_str())->SetTextColor(kRed);
+            } else if (line.find("PASSED") != std::string::npos) {
+                textBox.AddText(line.c_str())->SetTextColor(kGreen+2);
+            } else if (line.find("ERROR") != std::string::npos || 
+                       line.find("WARNING") != std::string::npos) {
+                textBox.AddText(line.c_str())->SetTextColor(kOrange+7);
+            } else if (line.find("DIRECTORY") != std::string::npos) {
+                textBox.AddText(line.c_str())->SetTextColor(kBlue);
+            } else {
+                textBox.AddText(line.c_str());
+            }
+        }
+        
+        textBox.Draw();
+        canvas.Print(filename);
+    }
+    
+    // Summary page
+    canvas.Clear();
+    canvas.Divide(1, 2);  // Split canvas into two parts
+    
+    // Top part for text summary
+    canvas.cd(1);
+    TPaveText summaryBox(0.05, 0.05, 0.95, 0.95);
+    summaryBox.AddText("GLOBAL VALIDATION SUMMARY");
+    summaryBox.AddText("");
+    summaryBox.AddText(TString::Format("Ladder: %s", TString(gState.currentLadder).Data()));
+    summaryBox.AddText(TString::Format("Total directories: %d", gState.passedDirs + gState.failedDirs));
+    summaryBox.AddText(TString::Format("Passed: %d", gState.passedDirs));
+    summaryBox.AddText(TString::Format("Failed: %d", gState.failedDirs));
+    summaryBox.AddText(TString::Format("Success rate: %.1f%%", 
+        (gState.passedDirs + gState.failedDirs > 0 ? 
+         100.0 * gState.passedDirs / (gState.passedDirs + gState.failedDirs) : 0)));
+    summaryBox.Draw();
+    
+    // Bottom part for pie chart
+    canvas.cd(2);
+    if (gState.passedDirs > 0 || gState.failedDirs > 0) {
+        TPie pie("pie", "Validation Results", 2);
+        pie.SetEntryVal(0, gState.passedDirs);
+        pie.SetEntryLabel(0, "Passed");
+        pie.SetEntryFillColor(0, kGreen);
+        
+        pie.SetEntryVal(1, gState.failedDirs);
+        pie.SetEntryLabel(1, "Failed");
+        pie.SetEntryFillColor(1, kRed);
+        
+        pie.SetLabelsOffset(-0.1);
+        pie.Draw("r");
+        
+        // Add legend
+        TLegend legend(0.7, 0.7, 0.9, 0.9);
+        legend.AddEntry((TObject*)0, TString::Format("Passed: %d", gState.passedDirs), "");
+        legend.AddEntry((TObject*)0, TString::Format("Failed: %d", gState.failedDirs), "");
+        legend.Draw();
+    }
+    
+    canvas.Print(filename);
+    canvas.Print(filename + "]");
+    
+    std::cout << "PDF report saved to: " << filename << std::endl;
 }
 
 void GenerateGlobalSummary(int totalDirs) {
@@ -1060,12 +1188,14 @@ void Exorcism() {
         GenerateReportPage(dir);
     }
     
-    // Generate and save final report
+    // Generate and save final reports
     GenerateGlobalSummary(directories.size());
     SaveTxtReport();
+    SaveRootReport();
+    SavePdfReport();
     
-    std::cout << "\nValidation complete! Results saved to ExorcismReport_"
-              << gState.currentLadder << ".txt" << std::endl;
+    std::cout << "\nValidation complete! Results saved for ladder: "
+              << gState.currentLadder << std::endl;
 }
 
 int main() {
