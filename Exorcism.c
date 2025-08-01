@@ -25,6 +25,11 @@
 // ===================================================================
 // Global Constants and Structures
 // ===================================================================
+// Evaluation status levels
+#define STATUS_PASSED           0
+#define STATUS_PASSED_WITH_ISSUES 1
+#define STATUS_FAILED           2
+
 // Log files flags
 #define FLAG_DIR_MISSING         0x01
 #define FLAG_LOG_MISSING         0x02
@@ -94,6 +99,7 @@ struct GlobalState {
     std::vector<std::string> reportPages;
     std::string globalSummary;
     int passedDirs = 0;
+    int passedWithIssuesDirs = 0;
     int failedDirs = 0;
     std::string currentLadder;
 };
@@ -159,7 +165,7 @@ bool CheckDataFileContent(const char* filePath) {
 }
 
 // ===================================================================
-// Validation Functions (Updated to match original Check* programs)
+// Validation Functions
 // ===================================================================
 ValidationResult CheckLogFiles(const char* targetDir) {
     ValidationResult result;
@@ -852,16 +858,38 @@ void GenerateReportPage(const TString& dirName) {
     ValidationResult connResult = CheckConnFiles(dirName.Data());
     
     // Determine overall status
-    bool dirPassed = !(logResult.flags || trimResult.flags || 
-                      pscanResult.flags || connResult.flags);
+    int dirStatus = STATUS_PASSED;
+    std::string statusStr = "PASSED";
     
-    if (dirPassed) {
-        gState.passedDirs++;
-        report << "STATUS: PASSED" << std::endl;
-    } else {
-        gState.failedDirs++;
-        report << "STATUS: FAILED" << std::endl;
+    // Check for serious failures first
+    if (logResult.flags & (FLAG_DIR_MISSING | FLAG_LOG_MISSING | FLAG_DATA_MISSING | FLAG_NO_FEB_FILE | FLAG_FILE_OPEN | FLAG_DATA_INVALID) ||
+        trimResult.flags & (FLAG_TRIM_FOLDER_MISSING | FLAG_DIR_ACCESS_TRIM | FLAG_FILE_OPEN_TRIM | FLAG_ELECTRON_COUNT_TRIM | FLAG_HOLE_COUNT_TRIM) ||
+        pscanResult.flags & (FLAG_PSCAN_FOLDER_MISSING | FLAG_DIR_ACCESS_PSCAN | FLAG_FILE_OPEN_PSCAN | FLAG_ELECTRON_TXT | FLAG_HOLE_TXT | FLAG_ELECTRON_ROOT | FLAG_HOLE_ROOT | FLAG_MODULE_ROOT | FLAG_MODULE_TXT | FLAG_MODULE_PDF) ||
+        connResult.flags & (FLAG_CONN_FOLDER_MISSING | FLAG_DIR_ACCESS | FLAG_FILE_OPEN_CONN | FLAG_ELECTRON_COUNT | FLAG_HOLE_COUNT)) {
+        dirStatus = STATUS_FAILED;
+        statusStr = "FAILED";
     }
+    // Check for minor issues (only empty files or unexpected files)
+    else if (logResult.flags & (FLAG_DATA_EMPTY | FLAG_UNEXPECTED_FILES) ||
+             pscanResult.flags & (FLAG_UNEXPECTED_FILES_PSCAN)) {
+        dirStatus = STATUS_PASSED_WITH_ISSUES;
+        statusStr = "PASSED WITH ISSUES";
+    }
+    
+    // Update counters based on status
+    switch (dirStatus) {
+        case STATUS_PASSED:
+            gState.passedDirs++;
+            break;
+        case STATUS_PASSED_WITH_ISSUES:
+            gState.passedWithIssuesDirs++;
+            break;
+        case STATUS_FAILED:
+            gState.failedDirs++;
+            break;
+    }
+    
+    report << "STATUS: " << statusStr << std::endl;
     
     // Add detailed results
     report << "\n[LOG FILES]" << std::endl;
@@ -1060,6 +1088,8 @@ void SavePdfReport() {
         while (std::getline(stream, line)) {
             if (line.find("FAILED") != std::string::npos) {
                 textBox.AddText(line.c_str())->SetTextColor(kRed);
+            } else if (line.find("PASSED WITH ISSUES") != std::string::npos) {
+                textBox.AddText(line.c_str())->SetTextColor(kOrange);
             } else if (line.find("PASSED") != std::string::npos) {
                 textBox.AddText(line.c_str())->SetTextColor(kGreen+2);
             } else if (line.find("ERROR") != std::string::npos || 
@@ -1086,34 +1116,57 @@ void SavePdfReport() {
     summaryBox.AddText("GLOBAL VALIDATION SUMMARY");
     summaryBox.AddText("");
     summaryBox.AddText(TString::Format("Ladder: %s", TString(gState.currentLadder).Data()));
-    summaryBox.AddText(TString::Format("Total directories: %d", gState.passedDirs + gState.failedDirs));
+    summaryBox.AddText(TString::Format("Total directories: %d", gState.passedDirs + gState.passedWithIssuesDirs + gState.failedDirs));
     summaryBox.AddText(TString::Format("Passed: %d", gState.passedDirs));
+    summaryBox.AddText(TString::Format("Passed with issues: %d", gState.passedWithIssuesDirs));
     summaryBox.AddText(TString::Format("Failed: %d", gState.failedDirs));
     summaryBox.AddText(TString::Format("Success rate: %.1f%%", 
-        (gState.passedDirs + gState.failedDirs > 0 ? 
-         100.0 * gState.passedDirs / (gState.passedDirs + gState.failedDirs) : 0)));
+        (gState.passedDirs + gState.passedWithIssuesDirs + gState.failedDirs > 0 ? 
+         100.0 * (gState.passedDirs + gState.passedWithIssuesDirs) / (gState.passedDirs + gState.passedWithIssuesDirs + gState.failedDirs) : 0)));
     summaryBox.Draw();
     
     // Bottom part for pie chart
     canvas.cd(2);
-    if (gState.passedDirs > 0 || gState.failedDirs > 0) {
-        TPie pie("pie", "Validation Results", 2);
-        pie.SetEntryVal(0, gState.passedDirs);
-        pie.SetEntryLabel(0, "Passed");
-        pie.SetEntryFillColor(0, kGreen);
+    if (gState.passedDirs > 0 || gState.passedWithIssuesDirs > 0 || gState.failedDirs > 0) {
         
-        pie.SetEntryVal(1, gState.failedDirs);
-        pie.SetEntryLabel(1, "Failed");
-        pie.SetEntryFillColor(1, kRed);
+        // Calculate total for normalization
+        double total = gState.passedDirs + gState.passedWithIssuesDirs + gState.failedDirs;
         
-        pie.SetLabelsOffset(-0.1);
-        pie.Draw("r");
+        TPie* pie = new TPie("pie", "", 3);
+        pie->SetCircle(0.3, 0.5, 0.2);
+        pie->SetEntryVal(0, gState.passedDirs);
+        pie->SetEntryLabel(0, "");
+        pie->SetEntryFillColor(0, kGreen);
+
+        pie->SetEntryVal(1, gState.passedWithIssuesDirs);
+        pie->SetEntryLabel(1, "");
+        pie->SetEntryFillColor(1, kOrange);
+
+        pie->SetEntryVal(2, gState.failedDirs);
+        pie->SetEntryLabel(2, "");
+        pie->SetEntryFillColor(2, kRed);
+
+        // Draw the pie chart first
+        pie->Draw("rsc");
+
+        // Create and position the legend
+        TLegend* legend = new TLegend(0.6, 0.5, 0.95, 0.85);
+        legend->SetHeader("Validation Results", "C");  // Center-aligned header
+        legend->SetTextSize(0.03);
+        legend->SetBorderSize(1);
+        legend->SetFillColor(0);
+
+        // Add entries with counts and percentages
+        legend->AddEntry("", TString::Format("Passed: %d (%.1f%%)", 
+                     gState.passedDirs, 100.0*gState.passedDirs/total), "");
+        legend->AddEntry("", TString::Format("Passed with issues: %d (%.1f%%)", 
+                     gState.passedWithIssuesDirs, 100.0*gState.passedWithIssuesDirs/total), "");
+        legend->AddEntry("", TString::Format("Failed: %d (%.1f%%)", 
+                     gState.failedDirs, 100.0*gState.failedDirs/total), "");
+
+        // Draw the legend
+        legend->Draw();
         
-        // Add legend
-        TLegend legend(0.7, 0.7, 0.9, 0.9);
-        legend.AddEntry((TObject*)0, TString::Format("Passed: %d", gState.passedDirs), "");
-        legend.AddEntry((TObject*)0, TString::Format("Failed: %d", gState.failedDirs), "");
-        legend.Draw();
     }
     
     canvas.Print(filename);
@@ -1130,9 +1183,10 @@ void GenerateGlobalSummary(int totalDirs) {
     summary << "Ladder:          " << gState.currentLadder << std::endl;
     summary << "Total directories: " << totalDirs << std::endl;
     summary << "Passed:          " << gState.passedDirs << std::endl;
+    summary << "Passed with issues: " << gState.passedWithIssuesDirs << std::endl;
     summary << "Failed:          " << gState.failedDirs << std::endl;
     summary << "Success rate:    " << std::fixed << std::setprecision(1) 
-            << (totalDirs > 0 ? (100.0 * gState.passedDirs / totalDirs) : 0) 
+            << (totalDirs > 0 ? (100.0 * (gState.passedDirs + gState.passedWithIssuesDirs) / totalDirs) : 0) 
             << "%" << std::endl;
     summary << "====================================================" << std::endl;
     
