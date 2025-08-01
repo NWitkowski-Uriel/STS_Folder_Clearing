@@ -1008,8 +1008,7 @@ void GenerateReportPage(const TString& dirName) {
     gState.reportPages.push_back(report.str());
 }
 
-void SaveTxtReport() {
-    TString filename = "ExorcismReport_" + gState.currentLadder + ".txt";
+void SaveTxtReport(const TString& filename) {
     std::ofstream out(filename.Data());
     
     out << "EXORCISM VALIDATION REPORT\n";
@@ -1026,8 +1025,7 @@ void SaveTxtReport() {
     std::cout << "Text report saved to: " << filename << std::endl;
 }
 
-void SaveRootReport() {
-    TString filename = "ExorcismReport_" + gState.currentLadder + ".root";
+void SaveRootReport(const TString& filename) {
     TFile file(filename, "RECREATE");
     
     for (size_t i = 0; i < gState.reportPages.size(); i++) {
@@ -1042,8 +1040,7 @@ void SaveRootReport() {
     std::cout << "ROOT report saved to: " << filename << std::endl;
 }
 
-void SavePdfReport() {
-    TString filename = "ExorcismReport_" + TString(gState.currentLadder) + ".pdf";
+void SavePdfReport(const TString& filename) {
     TCanvas canvas("canvas", "Validation Report", 1200, 1600);
     canvas.Print(filename + "[");
     
@@ -1218,6 +1215,112 @@ std::vector<TString> FindValidationDirectories() {
 }
 
 // ===================================================================
+// File Cleanup Function
+// ===================================================================
+void Extra_Omnes() {
+    std::cout << "\n===== FILE CLEANUP PROCEDURE =====" << std::endl;
+    std::cout << "This will remove problematic files after confirmation." << std::endl;
+    
+    std::vector<std::string> deletedFiles;
+    std::vector<std::string> failedDeletions;
+    
+    // Process all directories
+    std::vector<TString> directories = FindValidationDirectories();
+    for (const auto& dir : directories) {
+        // Run all validations to get the file lists
+        ValidationResult logResult = CheckLogFiles(dir.Data());
+        ValidationResult trimResult = CheckTrimFiles(dir.Data());
+        ValidationResult pscanResult = CheckPscanFiles(dir.Data());
+        ValidationResult connResult = CheckConnFiles(dir.Data());
+        
+        // Categorize files
+        struct FileCategory {
+            std::string name;
+            std::vector<std::string> files;
+        };
+        
+        std::vector<FileCategory> categories = {
+            {"Empty log data files", logResult.emptyFiles},
+            {"Invalid log data files", logResult.invalidFiles},
+            {"Unexpected files in log directory", {}},
+            {"Empty trim files", trimResult.emptyFiles},
+            {"Unexpected files in trim directory", {}},
+            {"Empty pscan files", pscanResult.emptyFiles},
+            {"Unexpected files in pscan directory", {}},
+            {"Empty connection files", connResult.emptyFiles},
+            {"Unexpected files in connection directory", {}}
+        };
+        
+        // Build full paths for unexpected files
+        for (const auto& file : logResult.unexpectedFiles) {
+            categories[2].files.push_back(TString::Format("%s/%s", dir.Data(), file.c_str()).Data());
+        }
+        for (const auto& file : trimResult.unexpectedFiles) {
+            categories[4].files.push_back(TString::Format("%s/trim_files/%s", dir.Data(), file.c_str()).Data());
+        }
+        for (const auto& file : pscanResult.unexpectedFiles) {
+            categories[6].files.push_back(TString::Format("%s/pscan_files/%s", dir.Data(), file.c_str()).Data());
+        }
+        for (const auto& file : connResult.unexpectedFiles) {
+            categories[8].files.push_back(TString::Format("%s/conn_check_files/%s", dir.Data(), file.c_str()).Data());
+        }
+        
+        // Process each category
+        for (auto& category : categories) {
+            if (category.files.empty()) continue;
+            
+            std::cout << "\n===== " << category.name << " =====" << std::endl;
+            std::cout << "Found " << category.files.size() << " files:" << std::endl;
+            for (const auto& file : category.files) {
+                std::cout << " - " << file << std::endl;
+            }
+            
+            std::cout << "\nDelete these " << category.files.size() << " " << category.name << "? (y/n): ";
+            std::string response;
+            std::getline(std::cin, response);
+            
+            if (response == "y" || response == "Y") {
+                for (const auto& file : category.files) {
+                    if (gSystem->Unlink(file.c_str())) {
+                        deletedFiles.push_back(file);
+                    } else {
+                        failedDeletions.push_back(file);
+                    }
+                }
+                std::cout << "Deleted " << category.files.size() << " files." << std::endl;
+            } else {
+                std::cout << "Skipped deletion of " << category.name << "." << std::endl;
+            }
+        }
+    }
+    
+    // Generate report
+    std::stringstream cleanupReport;
+    cleanupReport << "\n===== FILE CLEANUP REPORT =====" << std::endl;
+    cleanupReport << "Total deleted files: " << deletedFiles.size() << std::endl;
+    cleanupReport << "Total failed deletions: " << failedDeletions.size() << std::endl;
+    
+    if (!deletedFiles.empty()) {
+        cleanupReport << "\nSuccessfully deleted files:" << std::endl;
+        for (const auto& file : deletedFiles) {
+            cleanupReport << " - " << file << std::endl;
+        }
+    }
+    
+    if (!failedDeletions.empty()) {
+        cleanupReport << "\nFailed to delete:" << std::endl;
+        for (const auto& file : failedDeletions) {
+            cleanupReport << " - " << file << std::endl;
+        }
+    }
+    
+    // Add to global report
+    gState.globalSummary += cleanupReport.str();
+    
+    std::cout << cleanupReport.str() << std::endl;
+}
+
+// ===================================================================
 // Main Function - Exorcism
 // ===================================================================
 void Exorcism() {
@@ -1237,19 +1340,68 @@ void Exorcism() {
     std::cout << "Found " << directories.size() << " directories to validate" << std::endl;
     std::cout << "====================================================\n" << std::endl;
     
-    // Process all directories
+    // First validation pass (before cleanup)
+    std::cout << "\n===== FIRST VALIDATION PASS (BEFORE CLEANUP) =====" << std::endl;
     for (const auto& dir : directories) {
         GenerateReportPage(dir);
     }
-    
-    // Generate and save final reports
     GenerateGlobalSummary(directories.size());
-    SaveTxtReport();
-    SaveRootReport();
-    SavePdfReport();
     
-    std::cout << "\nValidation complete! Results saved for ladder: "
+    // Save pre-cleanup reports with "_before" suffix
+    TString timestamp = TString::Format("_%s_%s", __DATE__, __TIME__);
+    timestamp.ReplaceAll(" ", "_");
+    timestamp.ReplaceAll(":", "-");
+    
+    // Convert std::string to TString if needed
+    TString ladderName(gState.currentLadder.c_str());
+    
+    // Create filenames using TString::Format
+    TString beforeTxt = TString::Format("ExorcismReport_%s_before%s.txt", 
+                                      ladderName.Data(), timestamp.Data());
+    TString beforeRoot = TString::Format("ExorcismReport_%s_before%s.root", 
+                                       ladderName.Data(), timestamp.Data());
+    TString beforePdf = TString::Format("ExorcismReport_%s_before%s.pdf", 
+                                      ladderName.Data(), timestamp.Data());
+    
+    std::cout << "\nSaving pre-cleanup reports..." << std::endl;
+    SaveTxtReport(beforeTxt);
+    SaveRootReport(beforeRoot);
+    SavePdfReport(beforePdf);
+    
+    // Perform cleanup
+    Extra_Omnes();
+    
+    // Clear the global state for second validation pass
+    gState.reportPages.clear();
+    gState.passedDirs = 0;
+    gState.passedWithIssuesDirs = 0;
+    gState.failedDirs = 0;
+    gState.globalSummary.clear();
+    
+    // Second validation pass (after cleanup)
+    std::cout << "\n===== SECOND VALIDATION PASS (AFTER CLEANUP) =====" << std::endl;
+    for (const auto& dir : directories) {
+        GenerateReportPage(dir);
+    }
+    GenerateGlobalSummary(directories.size());
+    
+    // Save post-cleanup reports with "_after" suffix
+    TString afterTxt = TString::Format("ExorcismReport_%s_after%s.txt", 
+                                     ladderName.Data(), timestamp.Data());
+    TString afterRoot = TString::Format("ExorcismReport_%s_after%s.root", 
+                                      ladderName.Data(), timestamp.Data());
+    TString afterPdf = TString::Format("ExorcismReport_%s_after%s.pdf", 
+                                     ladderName.Data(), timestamp.Data());
+    
+    std::cout << "\nSaving post-cleanup reports..." << std::endl;
+    SaveTxtReport(afterTxt);
+    SaveRootReport(afterRoot);
+    SavePdfReport(afterPdf);
+    
+    std::cout << "\nValidation complete! Two sets of reports generated for ladder: "
               << gState.currentLadder << std::endl;
+    std::cout << "Pre-cleanup reports: " << beforeTxt << ", " << beforeRoot << ", " << beforePdf << std::endl;
+    std::cout << "Post-cleanup reports: " << afterTxt << ", " << afterRoot << ", " << afterPdf << std::endl;
 }
 
 int main() {
