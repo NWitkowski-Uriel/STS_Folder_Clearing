@@ -7,6 +7,7 @@
 #include <ctime>
 #include <map>
 #include <algorithm>
+#include <set>
 
 #include <TSystem.h>
 #include <TString.h>
@@ -121,7 +122,7 @@ TList* GetDirectoryListing(const TString& path) {
 bool CheckFileAccess(const TString& filePath, std::vector<std::string>& errorList) {
     std::ifstream file(filePath.Data());
     if (!file.is_open()) {
-        errorList.push_back(filePath.Data());
+        errorList.push_back(gSystem->BaseName(filePath.Data()));
         return false;
     }
     file.close();
@@ -131,7 +132,7 @@ bool CheckFileAccess(const TString& filePath, std::vector<std::string>& errorLis
 bool CheckRootFile(const TString& filePath, std::vector<std::string>& errorList) {
     TFile* file = TFile::Open(filePath, "READ");
     if (!file || file->IsZombie()) {
-        errorList.push_back(filePath.Data());
+        errorList.push_back(gSystem->BaseName(filePath.Data()));
         if (file) delete file;
         return false;
     }
@@ -219,7 +220,7 @@ ValidationResult CheckLogFiles(const char* targetDir) {
             std::ifstream f_data(fullFilePath.Data(), std::ios::binary | std::ios::ate);
             if (!f_data.is_open()) {
                 std::cerr << "Error: Cannot open data file: " << fullFilePath << std::endl;
-                result.openErrorFiles.push_back(fullFilePath.Data());
+                result.openErrorFiles.push_back(fileName.Data());
                 result.flags |= FLAG_FILE_OPEN;
             } else {
                 std::streampos size = f_data.tellg();
@@ -231,12 +232,12 @@ ValidationResult CheckLogFiles(const char* targetDir) {
                         result.validDataCount++;
                     } else {
                         std::cerr << "Error: Invalid content in data file: " << fullFilePath << std::endl;
-                        result.invalidFiles.push_back(fullFilePath.Data());
+                        result.invalidFiles.push_back(fileName.Data());
                         result.flags |= FLAG_DATA_INVALID;
                     }
                 } else {
                     std::cerr << "Warning: Empty data file: " << fullFilePath << std::endl;
-                    result.emptyFiles.push_back(fullFilePath.Data());
+                    result.emptyFiles.push_back(fileName.Data());
                     result.flags |= FLAG_DATA_EMPTY;
                 }
             }
@@ -355,6 +356,10 @@ ValidationResult CheckTrimFiles(const char* targetDir) {
         return result;
     }
 
+    // Track found indices for electron and hole files
+    std::set<int> foundElectronIndices;
+    std::set<int> foundHoleIndices;
+
     TSystemFile* file;
     TIter next(files);
     while ((file = (TSystemFile*)next())) {
@@ -364,32 +369,120 @@ ValidationResult CheckTrimFiles(const char* targetDir) {
         TString fullFilePath = trimDirPath + "/" + fileName;
 
         if (fileName.EndsWith("_elect.txt")) {
+            // Extract HW index from filename
+            Ssiz_t hwPos = fileName.Index("_HW_");
+            Ssiz_t setPos = fileName.Index("_SET_", hwPos+4);
+            
+            if (hwPos == -1 || setPos == -1 || setPos <= hwPos+4) {
+                std::cerr << "Error: Invalid electron file name format: " << fileName << std::endl;
+                result.invalidFiles.push_back(fileName.Data());
+                result.flags |= FLAG_DATA_INVALID;
+                continue;
+            }
+            
+            TString indexStr = fileName(hwPos+4, setPos-(hwPos+4));
+            bool isNumber = true;
+            for (int i = 0; i < indexStr.Length(); i++) {
+                if (!isdigit(indexStr[i])) {
+                    isNumber = false;
+                    break;
+                }
+            }
+            
+            if (!isNumber) {
+                std::cerr << "Error: Invalid HW index in electron file: " << fileName << std::endl;
+                result.invalidFiles.push_back(fileName.Data());
+                result.flags |= FLAG_DATA_INVALID;
+                continue;
+            }
+            
+            int hwIndex = atoi(indexStr.Data());
+            if (hwIndex < 0 || hwIndex > 7) {
+                std::cerr << "Error: HW index out of range (0-7) in electron file: " << fileName << std::endl;
+                result.invalidFiles.push_back(fileName.Data());
+                result.flags |= FLAG_DATA_INVALID;
+                continue;
+            }
+            
+            if (foundElectronIndices.find(hwIndex) != foundElectronIndices.end()) {
+                std::cerr << "Error: Duplicate HW index " << hwIndex << " in electron files" << std::endl;
+                result.invalidFiles.push_back(fileName.Data());
+                result.flags |= FLAG_DATA_INVALID;
+                continue;
+            }
+            
+            foundElectronIndices.insert(hwIndex);
             result.electronCount++;
+            
             std::ifstream f_test(fullFilePath.Data());
             if (!f_test.is_open()) {
                 std::cerr << "Error: Cannot open electron file: " << fullFilePath << std::endl;
-                result.openErrorFiles.push_back(fullFilePath.Data());
+                result.openErrorFiles.push_back(fileName.Data());
                 result.flags |= FLAG_FILE_OPEN_TRIM;
             } else {
                 // Check if file is empty
                 f_test.seekg(0, std::ios::end);
                 if (f_test.tellg() == 0) {
-                    result.emptyFiles.push_back(fullFilePath.Data());
+                    result.emptyFiles.push_back(fileName.Data());
                 }
                 f_test.close();
             }
         } else if (fileName.EndsWith("_holes.txt")) {
+            // Extract HW index from filename
+            Ssiz_t hwPos = fileName.Index("_HW_");
+            Ssiz_t setPos = fileName.Index("_SET_", hwPos+4);
+            
+            if (hwPos == -1 || setPos == -1 || setPos <= hwPos+4) {
+                std::cerr << "Error: Invalid hole file name format: " << fileName << std::endl;
+                result.invalidFiles.push_back(fileName.Data());
+                result.flags |= FLAG_DATA_INVALID;
+                continue;
+            }
+            
+            TString indexStr = fileName(hwPos+4, setPos-(hwPos+4));
+            bool isNumber = true;
+            for (int i = 0; i < indexStr.Length(); i++) {
+                if (!isdigit(indexStr[i])) {
+                    isNumber = false;
+                    break;
+                }
+            }
+            
+            if (!isNumber) {
+                std::cerr << "Error: Invalid HW index in hole file: " << fileName << std::endl;
+                result.invalidFiles.push_back(fileName.Data());
+                result.flags |= FLAG_DATA_INVALID;
+                continue;
+            }
+            
+            int hwIndex = atoi(indexStr.Data());
+            if (hwIndex < 0 || hwIndex > 7) {
+                std::cerr << "Error: HW index out of range (0-7) in hole file: " << fileName << std::endl;
+                result.invalidFiles.push_back(fileName.Data());
+                result.flags |= FLAG_DATA_INVALID;
+                continue;
+            }
+            
+            if (foundHoleIndices.find(hwIndex) != foundHoleIndices.end()) {
+                std::cerr << "Error: Duplicate HW index " << hwIndex << " in hole files" << std::endl;
+                result.invalidFiles.push_back(fileName.Data());
+                result.flags |= FLAG_DATA_INVALID;
+                continue;
+            }
+            
+            foundHoleIndices.insert(hwIndex);
             result.holeCount++;
+            
             std::ifstream f_test(fullFilePath.Data());
             if (!f_test.is_open()) {
                 std::cerr << "Error: Cannot open hole file: " << fullFilePath << std::endl;
-                result.openErrorFiles.push_back(fullFilePath.Data());
+                result.openErrorFiles.push_back(fileName.Data());
                 result.flags |= FLAG_FILE_OPEN_TRIM;
             } else {
                 // Check if file is empty
                 f_test.seekg(0, std::ios::end);
                 if (f_test.tellg() == 0) {
-                    result.emptyFiles.push_back(fullFilePath.Data());
+                    result.emptyFiles.push_back(fileName.Data());
                 }
                 f_test.close();
             }
@@ -402,13 +495,20 @@ ValidationResult CheckTrimFiles(const char* targetDir) {
 
     delete files;
 
-    // Set flags based on counts
+    // Set flags based on counts and indices
     if (result.electronCount != 8) {
         std::cerr << "Error: Incorrect number of electron files: " << result.electronCount << "/8" << std::endl;
         result.flags |= FLAG_ELECTRON_COUNT_TRIM;
+    } else if (foundElectronIndices.size() != 8) {
+        std::cerr << "Error: Missing or duplicate HW indices in electron files" << std::endl;
+        result.flags |= FLAG_ELECTRON_COUNT_TRIM;
     }
+    
     if (result.holeCount != 8) {
         std::cerr << "Error: Incorrect number of hole files: " << result.holeCount << "/8" << std::endl;
+        result.flags |= FLAG_HOLE_COUNT_TRIM;
+    } else if (foundHoleIndices.size() != 8) {
+        std::cerr << "Error: Missing or duplicate HW indices in hole files" << std::endl;
         result.flags |= FLAG_HOLE_COUNT_TRIM;
     }
 
@@ -420,11 +520,19 @@ ValidationResult CheckTrimFiles(const char* targetDir) {
     std::cout << "Hole files:     " << result.holeCount << "/8 | "
               << ((result.flags & FLAG_HOLE_COUNT_TRIM) ? "FAIL" : "OK")
               << (result.holeCount < 8 ? " (UNDER)" : (result.holeCount > 8 ? " (OVER)" : "")) << std::endl;
+    std::cout << "File name format: " << (result.invalidFiles.empty() ? "ALL VALID" : "ERRORS DETECTED") << std::endl;
     std::cout << "File accessibility: " << (result.openErrorFiles.empty() ? "ALL OK" : "ERRORS") << std::endl;
 
     if (!result.emptyFiles.empty()) {
         std::cout << "\n===== Empty Files =====" << std::endl;
         for (const auto& file : result.emptyFiles) {
+            std::cout << " - " << file << std::endl;
+        }
+    }
+
+    if (!result.invalidFiles.empty()) {
+        std::cout << "\n===== Invalid Files (Bad Name Format) =====" << std::endl;
+        for (const auto& file : result.invalidFiles) {
             std::cout << " - " << file << std::endl;
         }
     }
@@ -452,6 +560,7 @@ ValidationResult CheckTrimFiles(const char* targetDir) {
         if (result.flags & FLAG_ELECTRON_COUNT_TRIM) std::cout << "[ELECTRON COUNT] ";
         if (result.flags & FLAG_HOLE_COUNT_TRIM) std::cout << "[HOLE COUNT] ";
         if (result.flags & FLAG_FILE_OPEN_TRIM) std::cout << "[FILE OPEN ERROR] ";
+        if (result.flags & FLAG_DATA_INVALID) std::cout << "[INVALID FILENAME] ";
         if (result.flags & FLAG_UNEXPECTED_FILES_TRIM) std::cout << "[UNEXPECTED FILES]";
     }
     std::cout << std::endl;
@@ -481,13 +590,13 @@ ValidationResult CheckPscanFiles(const char* targetDir) {
     // Check module ROOT file
     if (gSystem->AccessPathName(moduleRoot, kFileExists)) {
         std::cerr << "Error: Module test root file does not exist: " << moduleRoot << std::endl;
-        result.moduleErrorFiles.push_back(moduleRoot.Data());
+        result.moduleErrorFiles.push_back(gSystem->BaseName(moduleRoot.Data()));
         result.flags |= FLAG_MODULE_ROOT;
     } else {
         TFile* f_root = TFile::Open(moduleRoot, "READ");
         if (!f_root || f_root->IsZombie()) {
             std::cerr << "Error: Cannot open module test root file: " << moduleRoot << std::endl;
-            result.moduleErrorFiles.push_back(moduleRoot.Data());
+            result.moduleErrorFiles.push_back(gSystem->BaseName(moduleRoot.Data()));
             result.flags |= FLAG_MODULE_ROOT;
         }
         if (f_root) f_root->Close();
@@ -496,19 +605,19 @@ ValidationResult CheckPscanFiles(const char* targetDir) {
     // Check module TXT file
     if (gSystem->AccessPathName(moduleTxt, kFileExists)) {
         std::cerr << "Error: Module test txt file does not exist: " << moduleTxt << std::endl;
-        result.moduleErrorFiles.push_back(moduleTxt.Data());
+        result.moduleErrorFiles.push_back(gSystem->BaseName(moduleTxt.Data()));
         result.flags |= FLAG_MODULE_TXT;
     } else {
         std::ifstream f_txt(moduleTxt.Data());
         if (!f_txt.is_open()) {
             std::cerr << "Error: Cannot open module test txt file: " << moduleTxt << std::endl;
-            result.moduleErrorFiles.push_back(moduleTxt.Data());
+            result.moduleErrorFiles.push_back(gSystem->BaseName(moduleTxt.Data()));
             result.flags |= FLAG_MODULE_TXT;
         } else {
             // Check if file is empty
             f_txt.seekg(0, std::ios::end);
             if (f_txt.tellg() == 0) {
-                result.emptyFiles.push_back(moduleTxt.Data());
+                result.emptyFiles.push_back(gSystem->BaseName(moduleTxt.Data()));
             }
             f_txt.close();
         }
@@ -517,7 +626,7 @@ ValidationResult CheckPscanFiles(const char* targetDir) {
     // Check module PDF file (existence only)
     if (gSystem->AccessPathName(modulePdf, kFileExists)) {
         std::cerr << "Error: Module test pdf file does not exist: " << modulePdf << std::endl;
-        result.moduleErrorFiles.push_back(modulePdf.Data());
+        result.moduleErrorFiles.push_back(gSystem->BaseName(modulePdf.Data()));
         result.flags |= FLAG_MODULE_PDF;
     }
 
@@ -551,13 +660,13 @@ ValidationResult CheckPscanFiles(const char* targetDir) {
             std::ifstream f_test(fullFilePath.Data());
             if (!f_test.is_open()) {
                 std::cerr << "Error: Cannot open electron txt file: " << fullFilePath << std::endl;
-                result.openErrorFiles.push_back(fullFilePath.Data());
+                result.openErrorFiles.push_back(fileName.Data());
                 result.flags |= FLAG_FILE_OPEN_PSCAN;
             } else {
                 // Check if file is empty
                 f_test.seekg(0, std::ios::end);
                 if (f_test.tellg() == 0) {
-                    result.emptyFiles.push_back(fullFilePath.Data());
+                    result.emptyFiles.push_back(fileName.Data());
                 }
                 f_test.close();
             }
@@ -569,13 +678,13 @@ ValidationResult CheckPscanFiles(const char* targetDir) {
             std::ifstream f_test(fullFilePath.Data());
             if (!f_test.is_open()) {
                 std::cerr << "Error: Cannot open hole txt file: " << fullFilePath << std::endl;
-                result.openErrorFiles.push_back(fullFilePath.Data());
+                result.openErrorFiles.push_back(fileName.Data());
                 result.flags |= FLAG_FILE_OPEN_PSCAN;
             } else {
                 // Check if file is empty
                 f_test.seekg(0, std::ios::end);
                 if (f_test.tellg() == 0) {
-                    result.emptyFiles.push_back(fullFilePath.Data());
+                    result.emptyFiles.push_back(fileName.Data());
                 }
                 f_test.close();
             }
@@ -587,7 +696,7 @@ ValidationResult CheckPscanFiles(const char* targetDir) {
             TFile* rootFile = TFile::Open(fullFilePath, "READ");
             if (!rootFile || rootFile->IsZombie()) {
                 std::cerr << "Error: Cannot open electron root file: " << fullFilePath << std::endl;
-                result.openErrorFiles.push_back(fullFilePath.Data());
+                result.openErrorFiles.push_back(fileName.Data());
                 result.flags |= FLAG_FILE_OPEN_PSCAN;
             }
             if (rootFile) rootFile->Close();
@@ -599,7 +708,7 @@ ValidationResult CheckPscanFiles(const char* targetDir) {
             TFile* rootFile = TFile::Open(fullFilePath, "READ");
             if (!rootFile || rootFile->IsZombie()) {
                 std::cerr << "Error: Cannot open hole root file: " << fullFilePath << std::endl;
-                result.openErrorFiles.push_back(fullFilePath.Data());
+                result.openErrorFiles.push_back(fileName.Data());
                 result.flags |= FLAG_FILE_OPEN_PSCAN;
             }
             if (rootFile) rootFile->Close();
@@ -751,13 +860,13 @@ ValidationResult CheckConnFiles(const char* targetDir) {
             std::ifstream f_test(fullFilePath.Data());
             if (!f_test.is_open()) {
                 std::cerr << "Error: Cannot open electron file: " << fullFilePath << std::endl;
-                result.openErrorFiles.push_back(fullFilePath.Data());
+                result.openErrorFiles.push_back(fileName.Data());
                 result.flags |= FLAG_FILE_OPEN_CONN;
             } else {
                 // Check if file is empty
                 f_test.seekg(0, std::ios::end);
                 if (f_test.tellg() == 0) {
-                    result.emptyFiles.push_back(fullFilePath.Data());
+                    result.emptyFiles.push_back(fileName.Data());
                 }
                 f_test.close();
             }
@@ -766,13 +875,13 @@ ValidationResult CheckConnFiles(const char* targetDir) {
             std::ifstream f_test(fullFilePath.Data());
             if (!f_test.is_open()) {
                 std::cerr << "Error: Cannot open hole file: " << fullFilePath << std::endl;
-                result.openErrorFiles.push_back(fullFilePath.Data());
+                result.openErrorFiles.push_back(fileName.Data());
                 result.flags |= FLAG_FILE_OPEN_CONN;
             } else {
                 // Check if file is empty
                 f_test.seekg(0, std::ios::end);
                 if (f_test.tellg() == 0) {
-                    result.emptyFiles.push_back(fullFilePath.Data());
+                    result.emptyFiles.push_back(fileName.Data());
                 }
                 f_test.close();
             }
@@ -1044,75 +1153,18 @@ void SavePdfReport(const TString& filename) {
     TCanvas canvas("canvas", "Validation Report", 1200, 1600);
     canvas.Print(filename + "[");
     
-    // Title page
+    // First page - Global Summary
     canvas.Clear();
-    canvas.cd();
-    
-    // Title
-    TLatex title(0.5, 0.7, "EXORCISM VALIDATION REPORT");
-    title.SetTextAlign(22);
-    title.SetTextSize(0.06);
-    title.SetTextColor(kBlue);
-    title.Draw();
-    
-    // Ladder name
-    TLatex ladder(0.5, 0.6, TString::Format("Ladder: %s", TString(gState.currentLadder).Data()));
-    ladder.SetTextAlign(22);
-    ladder.SetTextSize(0.05);
-    ladder.Draw();
-    
-    // Date and time
-    TLatex date(0.5, 0.5, TString::Format("Generated: %s %s", __DATE__, __TIME__));
-    date.SetTextAlign(22);
-    date.SetTextSize(0.04);
-    date.Draw();
-    
-    canvas.Print(filename);
-    
-    // Directory reports
-    for (const auto& report : gState.reportPages) {
-        canvas.Clear();
-        canvas.cd();
-        
-        TPaveText textBox(0.05, 0.05, 0.95, 0.95);
-        textBox.SetTextAlign(12);
-        textBox.SetTextSize(0.025);
-        textBox.SetFillColor(0);
-        textBox.SetBorderSize(1);
-        
-        std::istringstream stream(report);
-        std::string line;
-        while (std::getline(stream, line)) {
-            if (line.find("FAILED") != std::string::npos) {
-                textBox.AddText(line.c_str())->SetTextColor(kRed);
-            } else if (line.find("PASSED WITH ISSUES") != std::string::npos) {
-                textBox.AddText(line.c_str())->SetTextColor(kOrange);
-            } else if (line.find("PASSED") != std::string::npos) {
-                textBox.AddText(line.c_str())->SetTextColor(kGreen+2);
-            } else if (line.find("ERROR") != std::string::npos || 
-                       line.find("WARNING") != std::string::npos) {
-                textBox.AddText(line.c_str())->SetTextColor(kOrange+7);
-            } else if (line.find("DIRECTORY") != std::string::npos) {
-                textBox.AddText(line.c_str())->SetTextColor(kBlue);
-            } else {
-                textBox.AddText(line.c_str());
-            }
-        }
-        
-        textBox.Draw();
-        canvas.Print(filename);
-    }
-    
-    // Summary page
-    canvas.Clear();
-    canvas.Divide(1, 2);  // Split canvas into two parts
+    canvas.Divide(1, 2);
     
     // Top part for text summary
     canvas.cd(1);
     TPaveText summaryBox(0.05, 0.05, 0.95, 0.95);
-    summaryBox.AddText("GLOBAL VALIDATION SUMMARY");
+    summaryBox.AddText("EXORCISM VALIDATION REPORT - GLOBAL SUMMARY");
     summaryBox.AddText("");
     summaryBox.AddText(TString::Format("Ladder: %s", TString(gState.currentLadder).Data()));
+    summaryBox.AddText(TString::Format("Report generated: %s %s", __DATE__, __TIME__));
+    summaryBox.AddText("");
     summaryBox.AddText(TString::Format("Total directories: %d", gState.passedDirs + gState.passedWithIssuesDirs + gState.failedDirs));
     summaryBox.AddText(TString::Format("Passed: %d", gState.passedDirs));
     summaryBox.AddText(TString::Format("Passed with issues: %d", gState.passedWithIssuesDirs));
@@ -1125,8 +1177,6 @@ void SavePdfReport(const TString& filename) {
     // Bottom part for pie chart
     canvas.cd(2);
     if (gState.passedDirs > 0 || gState.passedWithIssuesDirs > 0 || gState.failedDirs > 0) {
-        
-        // Calculate total for normalization
         double total = gState.passedDirs + gState.passedWithIssuesDirs + gState.failedDirs;
         
         TPie* pie = new TPie("pie", "", 3);
@@ -1143,17 +1193,14 @@ void SavePdfReport(const TString& filename) {
         pie->SetEntryLabel(2, "");
         pie->SetEntryFillColor(2, kRed);
 
-        // Draw the pie chart first
         pie->Draw("rsc");
 
-        // Create and position the legend
         TLegend* legend = new TLegend(0.6, 0.5, 0.95, 0.85);
-        legend->SetHeader("Validation Results", "C");  // Center-aligned header
+        legend->SetHeader("Validation Results", "C");
         legend->SetTextSize(0.03);
         legend->SetBorderSize(1);
         legend->SetFillColor(0);
 
-        // Add entries with counts and percentages
         legend->AddEntry("", TString::Format("Passed: %d (%.1f%%)", 
                      gState.passedDirs, 100.0*gState.passedDirs/total), "");
         legend->AddEntry("", TString::Format("Passed with issues: %d (%.1f%%)", 
@@ -1161,14 +1208,128 @@ void SavePdfReport(const TString& filename) {
         legend->AddEntry("", TString::Format("Failed: %d (%.1f%%)", 
                      gState.failedDirs, 100.0*gState.failedDirs/total), "");
 
-        // Draw the legend
         legend->Draw();
-        
     }
     
     canvas.Print(filename);
-    canvas.Print(filename + "]");
     
+    // Directory reports
+    for (const auto& report : gState.reportPages) {
+        canvas.Clear();
+        canvas.cd();
+        
+        TPaveText textBox(0.05, 0.05, 0.95, 0.95);
+        textBox.SetTextAlign(12);
+        textBox.SetTextSize(0.025);
+        textBox.SetFillColor(0);
+        textBox.SetBorderSize(1);
+        
+        std::istringstream stream(report);
+        std::string line;
+        bool isFailedFolder = false;
+        
+        while (std::getline(stream, line)) {
+            // Status line
+            if (line.find("STATUS:") != std::string::npos) {
+                if (line.find("FAILED") != std::string::npos) {
+                    textBox.AddText(line.c_str())->SetTextColor(kRed);
+                    isFailedFolder = true;
+                } 
+                else if (line.find("PASSED WITH ISSUES") != std::string::npos) {
+                    textBox.AddText(line.c_str())->SetTextColor(kOrange);
+                    isFailedFolder = true;
+                }
+                else if (line.find("PASSED") != std::string::npos) {
+                    textBox.AddText(line.c_str())->SetTextColor(kGreen+2);
+                    isFailedFolder = false;
+                }
+                continue;
+            }
+            
+            // Log file status
+            if (line.find("Log file:") != std::string::npos) {
+                if (line.find("FOUND") != std::string::npos) {
+                    textBox.AddText(line.c_str())->SetTextColor(kGreen+2);
+                } else if (line.find("MISSING") != std::string::npos) {
+                    textBox.AddText(line.c_str())->SetTextColor(kRed);
+                } else {
+                    textBox.AddText(line.c_str());
+                }
+                continue;
+            }
+            
+            // Invalid files section
+            if (line.find("Invalid log data files:") != std::string::npos) {
+                textBox.AddText(line.c_str())->SetTextColor(kRed);
+                continue;
+            }
+            
+            // Module test errors section
+            if (line.find("Module test file errors:") != std::string::npos) {
+                textBox.AddText(line.c_str())->SetTextColor(kRed);
+                continue;
+            }
+            
+            // Individual file errors (lines starting with " - ")
+            if (line.find(" - ") == 0) {
+                textBox.AddText(line.c_str())->SetTextColor(kRed);
+                continue;
+            }
+            
+            // Count lines - color numbers if incorrect
+            if (line.find("files:") != std::string::npos || line.find("found:") != std::string::npos) {
+                size_t colonPos = line.find(":");
+                if (colonPos != std::string::npos) {
+                    std::string prefix = line.substr(0, colonPos + 1);
+                    std::string rest = line.substr(colonPos + 1);
+                    
+                    // Check if count is incorrect (looking for patterns like "X/8")
+                    bool isCountIncorrect = false;
+                    size_t slashPos = rest.find("/");
+                    if (slashPos != std::string::npos) {
+                        std::string countStr = rest.substr(0, slashPos);
+                        std::string expectedStr = rest.substr(slashPos + 1);
+    
+                        try {
+                            int count = std::stoi(countStr);
+                            int expected = std::stoi(expectedStr);
+                            if (count != expected) {
+                                isCountIncorrect = true;
+                            }
+                        } catch (const std::invalid_argument& e) {
+                            isCountIncorrect = true;
+                        } catch (const std::out_of_range& e) {
+                            isCountIncorrect = true;
+                        } 
+                    }                   
+                    // Add colored text
+                    textBox.AddText(prefix.c_str());
+                    if (isCountIncorrect) {
+                        textBox.AddText(rest.c_str())->SetTextColor(kRed);
+                    } else {
+                        textBox.AddText(rest.c_str())->SetTextColor(kGreen+2);
+                    }
+                } else {
+                    textBox.AddText(line.c_str());
+                }
+                continue;
+            }
+            
+            // Error messages
+            if (line.find("Error:") != std::string::npos || line.find("Warning:") != std::string::npos) {
+                textBox.AddText(line.c_str())->SetTextColor(kOrange+7);
+                continue;
+            }
+            
+            // Default case
+            textBox.AddText(line.c_str());
+        }
+        
+        textBox.Draw();
+        canvas.Print(filename);
+    }
+    
+    canvas.Print(filename + "]");
     std::cout << "PDF report saved to: " << filename << std::endl;
 }
 
@@ -1242,28 +1403,14 @@ void Extra_Omnes() {
         std::vector<FileCategory> categories = {
             {"Empty log data files", logResult.emptyFiles},
             {"Invalid log data files", logResult.invalidFiles},
-            {"Unexpected files in log directory", {}},
+            {"Unexpected files in log directory", logResult.unexpectedFiles},
             {"Empty trim files", trimResult.emptyFiles},
-            {"Unexpected files in trim directory", {}},
+            {"Unexpected files in trim directory", trimResult.unexpectedFiles},
             {"Empty pscan files", pscanResult.emptyFiles},
-            {"Unexpected files in pscan directory", {}},
+            {"Unexpected files in pscan directory", pscanResult.unexpectedFiles},
             {"Empty connection files", connResult.emptyFiles},
-            {"Unexpected files in connection directory", {}}
+            {"Unexpected files in connection directory", connResult.unexpectedFiles}
         };
-        
-        // Build full paths for unexpected files
-        for (const auto& file : logResult.unexpectedFiles) {
-            categories[2].files.push_back(TString::Format("%s/%s", dir.Data(), file.c_str()).Data());
-        }
-        for (const auto& file : trimResult.unexpectedFiles) {
-            categories[4].files.push_back(TString::Format("%s/trim_files/%s", dir.Data(), file.c_str()).Data());
-        }
-        for (const auto& file : pscanResult.unexpectedFiles) {
-            categories[6].files.push_back(TString::Format("%s/pscan_files/%s", dir.Data(), file.c_str()).Data());
-        }
-        for (const auto& file : connResult.unexpectedFiles) {
-            categories[8].files.push_back(TString::Format("%s/conn_check_files/%s", dir.Data(), file.c_str()).Data());
-        }
         
         // Process each category
         for (auto& category : categories) {
@@ -1281,7 +1428,18 @@ void Extra_Omnes() {
             
             if (response == "y" || response == "Y") {
                 for (const auto& file : category.files) {
-                    if (gSystem->Unlink(file.c_str())) {
+                    TString fullPath;
+                    if (category.name.find("log") != std::string::npos) {
+                        fullPath = TString::Format("%s/%s", dir.Data(), file.c_str());
+                    } else if (category.name.find("trim") != std::string::npos) {
+                        fullPath = TString::Format("%s/trim_files/%s", dir.Data(), file.c_str());
+                    } else if (category.name.find("pscan") != std::string::npos) {
+                        fullPath = TString::Format("%s/pscan_files/%s", dir.Data(), file.c_str());
+                    } else if (category.name.find("connection") != std::string::npos) {
+                        fullPath = TString::Format("%s/conn_check_files/%s", dir.Data(), file.c_str());
+                    }
+                    
+                    if (gSystem->Unlink(fullPath.Data())) {
                         deletedFiles.push_back(file);
                     } else {
                         failedDeletions.push_back(file);
