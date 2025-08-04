@@ -1246,15 +1246,45 @@ void SavePdfReport(const TString& filename) {
                 continue;
             }
             
-            // Log file status
+            // Log file status - modified to match "Tester FEB files" format
             if (line.find("Log file:") != std::string::npos) {
-                if (line.find("FOUND") != std::string::npos) {
-                    textBox.AddText(line.c_str())->SetTextColor(kGreen+2);
-                } else if (line.find("MISSING") != std::string::npos) {
-                    textBox.AddText(line.c_str())->SetTextColor(kRed);
+                size_t colonPos = line.find(":");
+                if (colonPos != std::string::npos) {
+                    std::string prefix = line.substr(0, colonPos + 1);
+                    std::string rest = line.substr(colonPos + 1);
+        
+                    textBox.AddText(prefix.c_str());
+                     if (rest.find("FOUND") != std::string::npos) {
+                        textBox.AddText(rest.c_str())->SetTextColor(kGreen+2);
+                    } else if (rest.find("MISSING") != std::string::npos) {
+                        textBox.AddText(rest.c_str())->SetTextColor(kRed);
+                    } else {
+                        textBox.AddText(rest.c_str());
+                    }
                 } else {
-                    textBox.AddText(line.c_str());
+                     textBox.AddText(line.c_str());
                 }
+                continue;
+            }
+
+            // Module files status - modified to match "Tester FEB files" format
+            if (line.find("Module files:") != std::string::npos) {
+                size_t colonPos = line.find(":");
+                if (colonPos != std::string::npos) {
+                    std::string prefix = line.substr(0, colonPos + 1);
+                    std::string rest = line.substr(colonPos + 1);
+        
+                    textBox.AddText(prefix.c_str());
+                    if (rest.find("ERROR") != std::string::npos) {
+                        textBox.AddText(rest.c_str())->SetTextColor(kRed);
+                    } else if (rest.find("OK") != std::string::npos) {
+                        textBox.AddText(rest.c_str())->SetTextColor(kGreen+2);
+                    } else {
+                        textBox.AddText(rest.c_str());
+                    }
+                    } else {
+                        textBox.AddText(line.c_str());
+                    }
                 continue;
             }
             
@@ -1308,6 +1338,46 @@ void SavePdfReport(const TString& filename) {
                         textBox.AddText(rest.c_str())->SetTextColor(kRed);
                     } else {
                         textBox.AddText(rest.c_str())->SetTextColor(kGreen+2);
+                    }
+                } else {
+                    textBox.AddText(line.c_str());
+                }
+                continue;
+            }
+
+            // Special handling for Pscan section counts
+            if (line.find("Electron text:") != std::string::npos || 
+                line.find("Hole text:") != std::string::npos ||
+                line.find("Electron root:") != std::string::npos ||
+                line.find("Hole root:") != std::string::npos) {
+                
+                size_t colonPos = line.find(":");
+                if (colonPos != std::string::npos) {
+                    std::string prefix = line.substr(0, colonPos + 1);
+                    std::string rest = line.substr(colonPos + 1);
+                    
+                    // Check if count is incorrect (8 expected)
+                    bool isCountCorrect = false;
+                    size_t slashPos = rest.find("/");
+                    if (slashPos != std::string::npos) {
+                        std::string countStr = rest.substr(0, slashPos);
+                        
+                        try {
+                            int count = std::stoi(countStr);
+                            if (count == 8) {
+                                isCountCorrect = true;
+                            }
+                        } catch (...) {
+                            // Ignore conversion errors
+                        }
+                    }
+                    
+                    // Add colored text
+                    textBox.AddText(prefix.c_str());
+                    if (isCountCorrect) {
+                        textBox.AddText(rest.c_str())->SetTextColor(kGreen+2);
+                    } else {
+                        textBox.AddText(rest.c_str())->SetTextColor(kRed);
                     }
                 } else {
                     textBox.AddText(line.c_str());
