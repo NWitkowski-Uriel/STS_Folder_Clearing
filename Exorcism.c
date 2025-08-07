@@ -207,47 +207,12 @@ ValidationResult CheckLogFiles(const char* targetDir) {
     struct FileInfo {
         TString fullPath;
         TString fileName;
-        TString timestamp;
-        time_t fileTime;
+        TString dateTimePattern;  // Stores YYMMDD_HHMM pattern
+        bool isSpecialCase;       // Flag for files without timestamp
     };
 
     std::vector<FileInfo> dataFiles;
     std::vector<FileInfo> testerFiles;
-
-    // Helper function to extract timestamp and convert to time_t
-    auto extractFileInfo = [](const TString& fileName) -> FileInfo {
-    FileInfo info;
-    info.fileName = fileName;
-    
-    // Extract timestamp (format for data files: M4DL0T0001610A2_240823_0940_data.dat)
-    // Format for tester files: tester_febs_setup0_arr_240823_0940
-    TRegexp timestampPattern("([0-9]{6}_[0-9]{4})");
-    Ssiz_t pos = 0;
-    Ssiz_t len = 0;
-    
-    if (timestampPattern.Index(fileName, &pos, len) != -1) {
-        info.timestamp = fileName(pos, len);
-        
-        // Parse timestamp (DDMMYY_HHMM)
-        TString dayStr = info.timestamp(0, 2);
-        TString monthStr = info.timestamp(2, 2);
-        TString yearStr = info.timestamp(4, 2);
-        TString hourStr = info.timestamp(7, 2);
-        TString minuteStr = info.timestamp(9, 2);
-        
-        struct tm timeinfo = {0};
-        timeinfo.tm_year = 2000 + atoi(yearStr.Data()) - 1900;
-        timeinfo.tm_mon = atoi(monthStr.Data()) - 1;
-        timeinfo.tm_mday = atoi(dayStr.Data());
-        timeinfo.tm_hour = atoi(hourStr.Data());
-        timeinfo.tm_min = atoi(minuteStr.Data());
-        timeinfo.tm_isdst = -1;
-        
-        info.fileTime = mktime(&timeinfo);
-    }
-    
-    return info;
-};
 
     TSystemFile* file;
     TIter next(files);
@@ -263,13 +228,30 @@ ValidationResult CheckLogFiles(const char* targetDir) {
             continue;
         }
 
-        // Check for data files
+        // Check for data files (two possible formats)
         if (fileName.BeginsWith(targetDir) && fileName.EndsWith("_data.dat")) {
             isExpectedFile = true;
             result.dataFileCount++;
             
-            FileInfo info = extractFileInfo(fileName);
+            FileInfo info;
             info.fullPath = fullFilePath;
+            info.fileName = fileName;
+            info.isSpecialCase = false;
+
+            // Check for standard format: "folder_YYMMDD_HHMM_data.dat"
+            if (fileName.Length() == (15 + 1 + 6 + 1 + 4 + 9)) { // 15 (folder) + _ + 6 (YYMMDD) + _ + 4 (HHMM) + _data.dat
+                info.dateTimePattern = fileName(16, 11); // Extract YYMMDD_HHMM
+            } 
+            // Check for special case: "folder_data.dat"
+            else if (fileName == TString::Format("%s_data.dat", targetDir)) {
+                info.isSpecialCase = true;
+            } else {
+                std::cerr << "Warning: Unexpected data file format: " << fileName << std::endl;
+                result.unexpectedFiles.push_back(fileName.Data());
+                result.flags |= FLAG_UNEXPECTED_FILES;
+                continue;
+            }
+            
             dataFiles.push_back(info);
             
             std::ifstream f_data(fullFilePath.Data(), std::ios::binary | std::ios::ate);
@@ -297,12 +279,26 @@ ValidationResult CheckLogFiles(const char* targetDir) {
                 }
             }
         }
-        // Check for FEB files
-        else if (fileName.BeginsWith("tester_febs_")) {
+        // Check for FEB files (format: "tester_febs_setup#_arr_YYMMDD_HHMM")
+        else if (fileName.BeginsWith("tester_febs_") && fileName.Contains("_arr_")) {
             isExpectedFile = true;
             
-            FileInfo info = extractFileInfo(fileName);
+            FileInfo info;
             info.fullPath = fullFilePath;
+            info.fileName = fileName;
+            info.isSpecialCase = false;
+            
+            // Extract YYMMDD_HHMM from FEB filename
+            Ssiz_t arrPos = fileName.Index("_arr_");
+            if (arrPos != kNPOS && fileName.Length() >= arrPos + 5 + 11) {
+                info.dateTimePattern = fileName(arrPos + 5, 11); // Extract YYMMDD_HHMM
+            } else {
+                std::cerr << "Warning: Invalid FEB file format: " << fileName << std::endl;
+                result.unexpectedFiles.push_back(fileName.Data());
+                result.flags |= FLAG_UNEXPECTED_FILES;
+                continue;
+            }
+            
             testerFiles.push_back(info);
         }
 
@@ -315,66 +311,53 @@ ValidationResult CheckLogFiles(const char* targetDir) {
 
     delete files;
 
-    // Match data files with tester files
-    std::map<TString, bool> matchedTesters; // tracks which tester files have been matched
-    for (auto& tester : testerFiles) {
-        matchedTesters[tester.fullPath] = false;
-    }
+    // Sort tester files by date (oldest first)
+    std::sort(testerFiles.begin(), testerFiles.end(), [](const FileInfo& a, const FileInfo& b) {
+        return a.dateTimePattern < b.dateTimePattern;
+    });
 
-    // First pass: try to find exact timestamp matches
+    // Match data files with tester files
+    std::vector<bool> matchedTesters(testerFiles.size(), false);
+    int specialCaseMatchIndex = -1;
+
     for (auto& dataFile : dataFiles) {
         bool foundMatch = false;
-        for (auto& testerFile : testerFiles) {
-            if (dataFile.timestamp == testerFile.timestamp && !matchedTesters[testerFile.fullPath]) {
-                matchedTesters[testerFile.fullPath] = true;
-                foundMatch = true;
-                std::cerr << "Info: Data file " << dataFile.fileName 
-                          << " matched with tester file " << testerFile.fileName << std::endl;
-                break;
+        
+        if (dataFile.isSpecialCase) {
+            // Special case: find the oldest unmatched tester file
+            for (size_t i = 0; i < testerFiles.size(); i++) {
+                if (!matchedTesters[i]) {
+                    matchedTesters[i] = true;
+                    foundMatch = true;
+                    specialCaseMatchIndex = i;
+                    std::cerr << "Info: Special case data file " << dataFile.fileName 
+                              << " matched with oldest available tester file " << testerFiles[i].fileName 
+                              << " (pattern: " << testerFiles[i].dateTimePattern << ")" << std::endl;
+                    break;
+                }
+            }
+        } else {
+            // Normal case: match by exact date pattern
+            for (size_t i = 0; i < testerFiles.size(); i++) {
+                if (!matchedTesters[i] && dataFile.dateTimePattern == testerFiles[i].dateTimePattern) {
+                    matchedTesters[i] = true;
+                    foundMatch = true;
+                    std::cerr << "Info: Data file " << dataFile.fileName 
+                              << " matched with tester file " << testerFiles[i].fileName 
+                              << " (pattern: " << dataFile.dateTimePattern << ")" << std::endl;
+                    break;
+                }
             }
         }
         
         if (!foundMatch) {
-            std::cerr << "Warning: No exact timestamp match found for data file: " 
-                      << dataFile.fileName << std::endl;
-        }
-    }
-
-    // Second pass: for unmatched data files, find the best matching tester file
-    for (auto& dataFile : dataFiles) {
-        bool hasExactMatch = false;
-        for (auto& testerFile : testerFiles) {
-            if (dataFile.timestamp == testerFile.timestamp) {
-                hasExactMatch = true;
-                break;
+            std::cerr << "Error: No matching tester file found for data file: " 
+                      << dataFile.fileName;
+            if (!dataFile.isSpecialCase) {
+                std::cerr << " (pattern: " << dataFile.dateTimePattern << ")";
             }
-        }
-        
-        if (!hasExactMatch && dataFile.fileTime != 0) {
-            // Find the closest unmatched tester file by time difference
-            TString bestTester;
-            time_t smallestDiff = std::numeric_limits<time_t>::max();
-            
-            for (auto& testerFile : testerFiles) {
-                if (!matchedTesters[testerFile.fullPath] && testerFile.fileTime != 0) {
-                    time_t diff = abs(dataFile.fileTime - testerFile.fileTime);
-                    if (diff < smallestDiff) {
-                        smallestDiff = diff;
-                        bestTester = testerFile.fullPath;
-                    }
-                }
-            }
-            
-            if (!bestTester.IsNull()) {
-                matchedTesters[bestTester] = true;
-                std::cerr << "Info: Data file " << dataFile.fileName
-                          << " matched with closest tester file (time difference: " 
-                          << smallestDiff << " seconds)" << std::endl;
-            } else {
-                std::cerr << "Error: No available tester file found for data file: "
-                          << dataFile.fileName << std::endl;
-                result.flags |= FLAG_NO_FEB_FILE;
-            }
+            std::cerr << std::endl;
+            result.flags |= FLAG_NO_FEB_FILE;
         }
     }
 
@@ -384,7 +367,7 @@ ValidationResult CheckLogFiles(const char* targetDir) {
         result.flags |= FLAG_NO_FEB_FILE;
     }
 
-    // Generate detailed report (same as before)
+    // Generate detailed report
     std::cout << "\n===== Log Files Status =====" << std::endl;
     std::cout << "Log file:         " << (result.logExists ? "FOUND" : "MISSING") 
               << (result.flags & FLAG_FILE_OPEN ? " (OPEN ERROR)" : "") << std::endl;
@@ -1574,7 +1557,7 @@ void Extra_Omnes() {
         ValidationResult pscanResult = CheckPscanFiles(dir.Data());
         ValidationResult connResult = CheckConnFiles(dir.Data());
 
-        // ===== 1. FIRST PROCESS DATA-TESTER PAIRS =====
+        // ===== 1. PROCESS DATA-TESTER PAIRS =====
         if (logResult.dataFileCount > 0) {
             TSystemDirectory dirObj(dir, dir);
             TList* files = dirObj.GetListOfFiles();
@@ -1582,39 +1565,62 @@ void Extra_Omnes() {
                 std::vector<std::pair<TString, TString>> dataTesterPairs;
                 std::map<TString, bool> testerFileMap;
 
-                // Collect all tester files (excluding logs)
+                // Collect all tester files
                 TSystemFile* file;
                 TIter next(files);
                 while ((file = (TSystemFile*)next())) {
                     TString fileName = file->GetName();
-                    if (fileName.BeginsWith("tester_febs_") && !fileName.EndsWith(".log")) {
-                        testerFileMap[fileName] = false;
+                    if (fileName.BeginsWith("tester_febs_") && fileName.Contains("_arr_")) {
+                        testerFileMap[fileName] = false; // Mark as unmatched initially
                     }
                 }
 
-                // Match data files with testers (excluding logs)
+                // Match data files with testers
                 TIter next2(files);
                 while ((file = (TSystemFile*)next2())) {
                     TString fileName = file->GetName();
-                    if (fileName.BeginsWith(dir) && fileName.EndsWith("_data.dat") && !fileName.EndsWith(".log")) {
-                        // Extract timestamp and match with tester
-                        Ssiz_t lastUnderscore = fileName.Last('_');
-                        if (lastUnderscore != kNPOS) {
-                            TString baseName = fileName(0, lastUnderscore);
-                            Ssiz_t timestampPos = baseName.Last('_');
-                            if (timestampPos != kNPOS) {
-                                TString timestamp = baseName(timestampPos+1, baseName.Length()-timestampPos-1);
-                                TString matchedTester;
-                                for (auto& tester : testerFileMap) {
-                                    if (tester.first.Contains(timestamp) && !tester.second) {
+                    if (fileName.BeginsWith(dir) && fileName.EndsWith("_data.dat")) {
+                        TString dataPattern;
+                        bool isSpecialCase = false;
+
+                        // Check for standard format: "folder_YYMMDD_HHMM_data.dat"
+                        if (fileName.Length() == (15 + 1 + 6 + 1 + 4 + 9)) {
+                            dataPattern = fileName(16, 11); // Extract YYMMDD_HHMM
+                        } 
+                        // Check for special case: "folder_data.dat"
+                        else if (fileName == TString::Format("%s_data.dat", dir.Data())) {
+                            isSpecialCase = true;
+                        } else {
+                            continue; // Skip unexpected formats
+                        }
+
+                        // Find matching tester file
+                        TString matchedTester;
+                        if (isSpecialCase) {
+                            // Special case: match with oldest available tester
+                            for (auto& tester : testerFileMap) {
+                                if (!tester.second) {
+                                    matchedTester = tester.first;
+                                    tester.second = true;
+                                    break;
+                                }
+                            }
+                        } else {
+                            // Normal case: match by exact pattern
+                            for (auto& tester : testerFileMap) {
+                                Ssiz_t arrPos = tester.first.Index("_arr_");
+                                if (arrPos != kNPOS && !tester.second) {
+                                    TString testerPattern = tester.first(arrPos + 5, 11);
+                                    if (dataPattern == testerPattern) {
                                         matchedTester = tester.first;
                                         tester.second = true;
                                         break;
                                     }
                                 }
-                                dataTesterPairs.emplace_back(fileName, matchedTester);
                             }
                         }
+
+                        dataTesterPairs.emplace_back(fileName, matchedTester);
                     }
                 }
 
@@ -1791,7 +1797,7 @@ void Extra_Omnes() {
     }
     
     // Generate cleanup report
-    std::stringstream cleanupReport;
+     std::stringstream cleanupReport;
     cleanupReport << "\n===== FILE CLEANUP REPORT =====" << std::endl;
     cleanupReport << "Total deleted files: " << deletedFiles.size() << std::endl;
     cleanupReport << "Total failed deletions: " << failedDeletions.size() << std::endl;
