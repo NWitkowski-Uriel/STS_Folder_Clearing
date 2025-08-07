@@ -22,17 +22,12 @@ Requirements
 
 Installation
 ------------
-1. Clone the repository:
-   git clone https://github.com/yourusername/exorcism.git
-   cd exorcism
-
-2. Compile the program:
-   make
+1. Download the repository:
 
 Usage
 -----
-Basic Validation:
-./Exorcism
+Basic Validation: 
+In the ladder folder: root ./Exorcism.C
 
 The program will:
 1. Scan the current directory for test data folders
