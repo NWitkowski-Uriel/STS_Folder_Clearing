@@ -3,7 +3,7 @@ EXORCISM - Ladder Test Data Validation System
 
 Overview
 --------
-EXORCISM is a comprehensive validation system for semiconductor ladder test data directories. It performs automated checks on directory structures, file naming conventions, content validity, and generates detailed reports before and after cleanup operations.
+EXORCISM is a comprehensive validation system for ladder test data directories. It performs automated checks on directory structures, file naming conventions, content validity, and generates detailed reports before and after cleanup operations.
 
 Key Features
 ------------
