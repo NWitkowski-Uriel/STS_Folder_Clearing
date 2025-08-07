@@ -2542,7 +2542,7 @@ void Extra_Omnes() {
 /*
  * Exorcism:
  * Main driver function that orchestrates the entire validation process.
- * Performs complete validation of semiconductor test data directories including:
+ * Performs complete validation of ladder test data directories including:
  * - Directory discovery
  * - Two-pass validation (before/after cleanup)
  * - Comprehensive report generation
