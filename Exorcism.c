@@ -1,4 +1,5 @@
 /*
+ *
  * EXORCISM - Ladder Test Data Validation System
  * Copyright (c) 2025 Nikodem Witkowski
  * Licensed under the MIT License
@@ -2685,3 +2686,5 @@ int main() {
     Exorcism();
     return 0;
 }
+
+
