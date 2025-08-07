@@ -1,7 +1,7 @@
 /*
  *
  * EXORCISM - Ladder Test Data Validation System
- * Copyright (c) 2023 [Your Name]
+ * Copyright (c) 2025 Nikodem Witkowski
  * Licensed under the MIT License
  * 
  * This program performs comprehensive validation of ladder test data
