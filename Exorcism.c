@@ -1,5 +1,8 @@
 /*
+ *
  * EXORCISM - Ladder Test Data Validation System
+ * Copyright (c) 2023 [Your Name]
+ * Licensed under the MIT License
  * 
  * This program performs comprehensive validation of ladder test data
  * directory structures and files. It checks for required files, naming conventions,
@@ -2683,4 +2686,5 @@ int main() {
     Exorcism();
     return 0;
 }
+
 
