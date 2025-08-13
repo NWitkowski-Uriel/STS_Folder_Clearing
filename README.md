@@ -98,11 +98,12 @@ VALIDATION SUMMARY
 ====================================================
 Ladder:          Ladder_12AB
 Total directories: 24
-Passed:          18
-Passed with issues: 4
-Failed:          2
+Directories with consistent data: 18
+Directories with inconsistent data (auxiliary files found): 4
+Directories with inconsistent data (Missing/Extra files): 2
+Directories with access errors: 0
 Success rate:    91.7%
-Warning rate among passed: 18.2%
+Warning rate among passed: 22.2%
 Overall Status: "GOOD (≥80% success)"
 
 Contributing
