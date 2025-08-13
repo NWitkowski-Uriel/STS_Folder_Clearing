@@ -1,5 +1,4 @@
 /*
- *
  * EXORCISM - Ladder Test Data Validation System
  * Copyright (c) 2025 Nikodem Witkowski
  * Licensed under the MIT License
@@ -118,7 +117,7 @@ struct ValidationResult {
     int dataFileCount = 0;      // Total data files found
     int nonEmptyDataCount = 0;  // Non-empty data files
     int validDataCount = 0;     // Data files with valid content
-    bool foundFebFile = false;  // Found matching tester FEB file
+    bool foundFebFile = true;   // Found matching tester FEB file
     bool logExists = false;     // Main log file exists
     
     // Trim/Conn files specific counters
@@ -459,6 +458,8 @@ ValidationResult CheckLogFiles(const char* targetDir) {
             std::cerr << std::endl;
             result.flags |= FLAG_NO_FEB_FILE;
         }
+
+        result.foundFebFile &= foundMatch; // Update overall FEB file match status
     }
 
     // Final check if we have data files but no FEB files at all
@@ -2713,6 +2714,5 @@ void Exorcism() {
 int main() {
     Exorcism();
     return 0;
+
 }
-
-
