@@ -44,9 +44,10 @@
  * Evaluation Status Levels:
  * These constants define the possible validation outcomes
  */
-#define STATUS_PASSED           0       // All checks successful
-#define STATUS_PASSED_WITH_ISSUES 1     // Minor non-critical issues
-#define STATUS_FAILED           2       // Critical validation failures
+#define STATUS_DATA_CONSISTENT                  0       // All checks successful
+#define STATUS_DATA_INCONSISTENT_AUXILIARY      1       // Auxiliary files found but not critical
+#define STATUS_DATA_INCONSISTENT_MISSING_EXTRA  2       // Missing/Extra files error
+#define STATUS_DIRECTORY_ERROR                  3       // Directory access error
 
 /*
  * Log Files Validation Flags (Bitmask):
@@ -136,11 +137,12 @@ struct ValidationResult {
  * Tracks overall validation state across all directories
  */
 struct GlobalState {
-    std::vector<std::string> reportPages;  // Individual directory reports
-    std::string globalSummary;             // Consolidated summary
-    int passedDirs = 0;                    // Count of passed directories
-    int passedWithIssuesDirs = 0;          // Count of passed with issues
-    int failedDirs = 0;                    // Count of failed directories
+    std::vector<std::string> reportPages;   // Individual directory reports
+    std::string globalSummary;              // Consolidated summary
+    int goodDirs = 0;                       // Count of good quality directories
+    int auxDirs = 0;                        // Count of directories with auxiliary files
+    int missextraDirs = 0;                  // Count of directories with missing/extra files 
+    int errorDirs = 0;                      // Count of directories ith access errors
     std::string currentLadder;             // Current working directory name
 };
 
@@ -1346,37 +1348,50 @@ void GenerateReportPage(const TString& dirName) {
     // ===================================================================
     // DETERMINE OVERALL STATUS
     // ===================================================================
-    /* Status hierarchy: FAILED > PASSED_WITH_ISSUES > PASSED */
-    int dirStatus = STATUS_PASSED;
-    std::string statusStr = "PASSED";
+    /* Status hierarchy: DIRECTORY PROBLEM> INCONSISTENT DATA (MISSING/EXTRA) > INCONSISTENT DATA (AUXILIARY FILES) > CONSISTENT DATA */
+    int dirStatus = STATUS_DATA_CONSISTENT;
+    std::string statusStr = "DATA CONSISTENT ";
     
-    // Check for critical failures first
-    if (logResult.flags & (FLAG_DIR_MISSING | FLAG_LOG_MISSING | FLAG_DATA_MISSING | FLAG_NO_FEB_FILE | FLAG_FILE_OPEN | FLAG_DATA_INVALID) ||
-        trimResult.flags & (FLAG_TRIM_FOLDER_MISSING | FLAG_DIR_ACCESS_TRIM | FLAG_FILE_OPEN_TRIM | FLAG_ELECTRON_COUNT_TRIM | FLAG_HOLE_COUNT_TRIM) ||
-        pscanResult.flags & (FLAG_PSCAN_FOLDER_MISSING | FLAG_DIR_ACCESS_PSCAN | FLAG_FILE_OPEN_PSCAN | FLAG_ELECTRON_TXT | FLAG_HOLE_TXT | FLAG_ELECTRON_ROOT | FLAG_HOLE_ROOT | FLAG_MODULE_ROOT | FLAG_MODULE_TXT | FLAG_MODULE_PDF) ||
-        connResult.flags & (FLAG_CONN_FOLDER_MISSING | FLAG_DIR_ACCESS | FLAG_FILE_OPEN_CONN | FLAG_ELECTRON_COUNT | FLAG_HOLE_COUNT)) {
-        dirStatus = STATUS_FAILED;
-        statusStr = "FAILED";
+    // Check for directory problems first
+    if (logResult.flags & (FLAG_DIR_MISSING) ||
+        trimResult.flags & (FLAG_TRIM_FOLDER_MISSING | FLAG_DIR_ACCESS_TRIM) ||
+        pscanResult.flags & (FLAG_PSCAN_FOLDER_MISSING | FLAG_DIR_ACCESS_PSCAN) ||
+        connResult.flags & (FLAG_CONN_FOLDER_MISSING | FLAG_DIR_ACCESS)) {
+        dirStatus = STATUS_DIRECTORY_ERROR;
+        statusStr = "DIRECTORY ERROR";
+     }
+    //check for critical issues (missing/extra files)
+     else if (logResult.flags & (FLAG_LOG_MISSING | FLAG_DATA_MISSING | FLAG_NO_FEB_FILE | FLAG_FILE_OPEN | FLAG_DATA_INVALID | FLAG_DATA_EMPTY) ||
+        trimResult.flags & (FLAG_FILE_OPEN_TRIM | FLAG_ELECTRON_COUNT_TRIM | FLAG_HOLE_COUNT_TRIM) ||
+        pscanResult.flags & (FLAG_FILE_OPEN_PSCAN | FLAG_ELECTRON_TXT | FLAG_HOLE_TXT | FLAG_ELECTRON_ROOT | FLAG_HOLE_ROOT | FLAG_MODULE_ROOT | FLAG_MODULE_TXT | FLAG_MODULE_PDF) ||
+        connResult.flags & (FLAG_FILE_OPEN_CONN | FLAG_ELECTRON_COUNT | FLAG_HOLE_COUNT)) {
+        dirStatus = STATUS_DATA_INCONSISTENT_MISSING_EXTRA;
+        statusStr = "DATA INCONSISTENT (MISSING/EXTRA)";
     }
-    // Check for non-critical issues (only empty/unexpected files)
-    else if (logResult.flags & (FLAG_DATA_EMPTY | FLAG_UNEXPECTED_FILES) ||
-             pscanResult.flags & (FLAG_UNEXPECTED_FILES_PSCAN)) {
-        dirStatus = STATUS_PASSED_WITH_ISSUES;
-        statusStr = "PASSED WITH ISSUES";
+    // Check for non-critical issues (unexpected files)
+    else if (logResult.flags & (FLAG_UNEXPECTED_FILES) ||
+             trimResult.flags & (FLAG_UNEXPECTED_FILES_TRIM) ||
+             pscanResult.flags & (FLAG_UNEXPECTED_FILES_PSCAN) ||
+             connResult.flags & (FLAG_UNEXPECTED_FILES_CONN)) {
+        dirStatus = STATUS_DATA_INCONSISTENT_AUXILIARY;
+        statusStr = "DATA INCONSISTENT (AUXILIARY FILES)";
     }
     
     // ===================================================================
     // UPDATE GLOBAL COUNTERS
     // ===================================================================
     switch (dirStatus) {
-        case STATUS_PASSED:
-            gState.passedDirs++;
+        case STATUS_DATA_CONSISTENT:
+            gState.goodDirs++;
             break;
-        case STATUS_PASSED_WITH_ISSUES:
-            gState.passedWithIssuesDirs++;
+        case STATUS_DATA_INCONSISTENT_AUXILIARY:
+            gState.auxDirs++;
             break;
-        case STATUS_FAILED:
-            gState.failedDirs++;
+        case STATUS_DATA_INCONSISTENT_MISSING_EXTRA:
+            gState.missextraDirs++;
+            break;
+        case STATUS_DIRECTORY_ERROR:
+            gState.errorDirs++;
             break;
     }
     
@@ -1395,7 +1410,7 @@ void GenerateReportPage(const TString& dirName) {
               (logResult.flags & FLAG_DATA_INVALID) ? "SOME INVALID" : "VALID") << std::endl;
     report << "Non-empty files: " << logResult.nonEmptyDataCount << "/" << logResult.dataFileCount << std::endl;
     report << "Valid files: " << logResult.validDataCount << "/" << logResult.dataFileCount << std::endl;
-    report << "Tester FEB files: " << (logResult.foundFebFile ? "FOUND" : "NONE") << std::endl;
+    report << "Tester FEB files: " << (logResult.foundFebFile ? "MATCHED" : "UNMATCHED") << std::endl;
     report << "Log file: " << (logResult.logExists ? "FOUND" : "MISSING") << std::endl;
     
     // 2a. Empty log files
@@ -1563,7 +1578,7 @@ void SaveTxtReport(const TString& filename) {
     out << "Ladder: " << gState.currentLadder << "\n";
     out << "Report generated: " << __DATE__ << " " << __TIME__ << "\n";
     out << "Total directories processed: " 
-        << (gState.passedDirs + gState.passedWithIssuesDirs + gState.failedDirs) << "\n";
+        << (gState.goodDirs + gState.auxDirs + gState.missextraDirs+gState.errorDirs) << "\n";
     out << "-------------------------------------------------------\n\n";
 
     // ===================================================================
@@ -1593,14 +1608,15 @@ void SaveTxtReport(const TString& filename) {
     out << "=======================================================\n\n";
     
     // Calculate success rate (handling division by zero)
-    int totalDirs = gState.passedDirs + gState.passedWithIssuesDirs + gState.failedDirs;
+    int totalDirs = gState.goodDirs + gState.auxDirs + gState.missextraDirs+gState.errorDirs;
     float successRate = (totalDirs > 0) ? 
-        (100.0f * (gState.passedDirs + gState.passedWithIssuesDirs) / totalDirs) : 0.0f;
+        (100.0f * (gState.goodDirs + gState.auxDirs) / totalDirs) : 0.0f;
 
     // Summary statistics
-    out << "Directories passed completely: " << gState.passedDirs << "\n";
-    out << "Directories passed with issues: " << gState.passedWithIssuesDirs << "\n";
-    out << "Directories failed: " << gState.failedDirs << "\n";
+    out << "Directories with consistent data: " << gState.goodDirs << "\n";
+    out << "Directories with inconsistent data (auxiliary files found): " << gState.auxDirs << "\n";
+    out << "Directories with inconsistent data (missing/extra files): " << gState.missextraDirs << "\n";
+    out << "Directories with access errors: " << gState.errorDirs << "\n";
     out << "Overall success rate: " << std::fixed << std::setprecision(1) 
         << successRate << "%\n\n";
     
@@ -1755,12 +1771,13 @@ void SavePdfReport(const TString& filename) {
     summaryBox.AddText("");
 
     // Calculate totals and success rate
-    int totalDirs = gState.passedDirs + gState.passedWithIssuesDirs + gState.failedDirs;
+    int totalDirs = gState.goodDirs + gState.auxDirs + gState.missextraDirs+gState.errorDirs;
     summaryBox.AddText(TString::Format("Total directories: %d", totalDirs));
-    summaryBox.AddText(TString::Format("Passed: %d", gState.passedDirs));
-    summaryBox.AddText(TString::Format("Passed with issues: %d", gState.passedWithIssuesDirs));
-    summaryBox.AddText(TString::Format("Failed: %d", gState.failedDirs));
-    summaryBox.AddText(TString::Format("Success rate: %.1f%%", (totalDirs > 0 ? 100.0 * (gState.passedDirs + gState.passedWithIssuesDirs) / totalDirs : 0)));
+    summaryBox.AddText(TString::Format("Directories with consistent data: %d", gState.goodDirs));
+    summaryBox.AddText(TString::Format("Directories with inconsistent data (auxiliary files found): %d", gState.auxDirs));
+    summaryBox.AddText(TString::Format("Directories with inconsistent data (missing/extra files): %d", gState.missextraDirs));
+    summaryBox.AddText(TString::Format("Directories with access errors: %d", gState.errorDirs));
+    summaryBox.AddText(TString::Format("Success rate: %.1f%%", (totalDirs > 0 ? 100.0 * (gState.goodDirs + gState.auxDirs) / totalDirs : 0)));
 
     // Style the summary box
     summaryBox.SetTextAlign(12);  // Center alignment
@@ -1782,17 +1799,21 @@ void SavePdfReport(const TString& filename) {
         pie->SetCircle(0.3, 0.5, 0.2);
         
         // Add data segments with colors
-        pie->SetEntryVal(0, gState.passedDirs);
+        pie->SetEntryVal(0, gState.goodDirs);
         pie->SetEntryLabel(0, "");
         pie->SetEntryFillColor(0, kGreen);
 
-        pie->SetEntryVal(1, gState.passedWithIssuesDirs);
+        pie->SetEntryVal(1, gState.auxDirs);
         pie->SetEntryLabel(1, "");
         pie->SetEntryFillColor(1, kOrange);
 
-        pie->SetEntryVal(2, gState.failedDirs);
+        pie->SetEntryVal(2, gState.missextraDirs);
         pie->SetEntryLabel(2, "");
         pie->SetEntryFillColor(2, kRed);
+
+        pie->SetEntryVal(3, gState.errorDirs);
+        pie->SetEntryLabel(3, "");
+        pie->SetEntryFillColor(3, kViolet);
 
         // Draw the pie chart
         pie->Draw("rsc");
@@ -1805,12 +1826,14 @@ void SavePdfReport(const TString& filename) {
         legend->SetFillColor(0);
 
         // Add legend entries with percentages
-        legend->AddEntry("", TString::Format("Passed: %d (%.1f%%)", 
-            gState.passedDirs, 100.0*gState.passedDirs/totalDirs), "");
-        legend->AddEntry("", TString::Format("Passed with issues: %d (%.1f%%)", 
-            gState.passedWithIssuesDirs, 100.0*gState.passedWithIssuesDirs/totalDirs), "");
-        legend->AddEntry("", TString::Format("Failed: %d (%.1f%%)", 
-            gState.failedDirs, 100.0*gState.failedDirs/totalDirs), "");
+        legend->AddEntry("", TString::Format("Consistent: %d (%.1f%%)", 
+            gState.goodDirs, 100.0*gState.goodDirs/totalDirs), "");
+        legend->AddEntry("", TString::Format("Auxiliary: %d (%.1f%%)", 
+            gState.auxDirs, 100.0*gState.auxDirs/totalDirs), "");
+        legend->AddEntry("", TString::Format("Missing/Extra: %d (%.1f%%)", 
+            gState.missextraDirs, 100.0*gState.missextraDirs/totalDirs), "");
+        legend->AddEntry("", TString::Format("Access error: %d (%.1f%%)", 
+            gState.errorDirs, 100.0*gState.errorDirs/totalDirs), "");
 
         legend->Draw();
     } else {
@@ -1848,15 +1871,19 @@ void SavePdfReport(const TString& filename) {
             
             // Handle status line with color coding
             if (line.find("STATUS:") != std::string::npos) {
-                if (line.find("FAILED") != std::string::npos) {
+                if (line.find("DIRECTORY ERROR") != std::string::npos) {
+                    textBox.AddText(line.c_str())->SetTextColor(kViolet);
+                    isFailedFolder = true;
+                }
+                 else if (line.find("DATA INCONSISTENT (MISSING/EXTRA)") != std::string::npos) {
                     textBox.AddText(line.c_str())->SetTextColor(kRed);
                     isFailedFolder = true;
                 } 
-                else if (line.find("PASSED WITH ISSUES") != std::string::npos) {
+                else if (line.find("DATA INCONSISTENT (AUXILIARY FILES)") != std::string::npos) {
                     textBox.AddText(line.c_str())->SetTextColor(kOrange);
                     isFailedFolder = true;
                 }
-                else if (line.find("PASSED") != std::string::npos) {
+                else if (line.find("DATA CONSISTENT") != std::string::npos) {
                     textBox.AddText(line.c_str())->SetTextColor(kGreen+2);
                     isFailedFolder = false;
                 }
@@ -2063,14 +2090,15 @@ void GenerateGlobalSummary(int totalDirs) {
     // ===================================================================
     /* Calculate success rate with protection against division by zero */
     float successRate = totalDirs > 0 ? 
-        (100.0f * (gState.passedDirs + gState.passedWithIssuesDirs) / totalDirs) : 0.0f;
+        (100.0f * (gState.goodDirs + gState.auxDirs) / totalDirs) : 0.0f;
 
     // Basic counts
     summary << "Ladder:          " << gState.currentLadder << "\n";
-    summary << "Total directories: " << totalDirs << "\n";
-    summary << "Passed:          " << gState.passedDirs << "\n";
-    summary << "Passed with issues: " << gState.passedWithIssuesDirs << "\n";
-    summary << "Failed:          " << gState.failedDirs << "\n";
+    summary << "Total directories:      " << totalDirs << "\n";
+    summary << "Directories with consistent data:    " << gState.goodDirs << "\n";
+    summary << "Directories with inconsistent data (auxiliary files found):     " << gState.auxDirs << "\n";
+    summary << "Directories with inconsistent data (Missing/Extra files):   " << gState.missextraDirs << "\n";
+    summary << "Directories with access errors:     " << gState.errorDirs << "\n";
 
     // Success rate with fixed decimal precision
     summary << "Success rate:    " << std::fixed << std::setprecision(1) 
@@ -2080,16 +2108,16 @@ void GenerateGlobalSummary(int totalDirs) {
     // ADDITIONAL METRICS (when applicable)
     // ===================================================================
     /* Include warning ratios if there are passed-with-issues cases */
-    if (gState.passedWithIssuesDirs > 0) {
-        float warningRate = 100.0f * gState.passedWithIssuesDirs / 
-                          (gState.passedDirs + gState.passedWithIssuesDirs);
+    if (gState.auxDirs > 0) {
+        float warningRate = 100.0f * gState.auxDirs / 
+                          (gState.goodDirs + gState.auxDirs);
         summary << "Warning rate among passed: " << std::setprecision(1) 
                 << warningRate << "%\n";
     }
 
     /* Critical failure analysis */
-    if (gState.failedDirs > 0) {
-        float failureRate = 100.0f * gState.failedDirs / totalDirs;
+    if (gState.missextraDirs > 0 || gState.errorDirs > 0) {
+        float failureRate = 100.0f * (gState.missextraDirs +gState.errorDirs)/ totalDirs;
         summary << "Critical failure rate: " << std::setprecision(1) 
                 << failureRate << "%\n";
     }
