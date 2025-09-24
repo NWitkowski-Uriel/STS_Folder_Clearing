@@ -11,7 +11,7 @@ Key Features
 - Smart Matching: Automatically matches test data files with corresponding tester FEB files
 - Comprehensive Reporting: Generates reports in TXT, ROOT, and PDF formats
 - Interactive Cleanup: Guided removal of problematic files with user confirmation
-- Status Classification: Classifies directories as PASSED, PASSED WITH ISSUES, or FAILED
+- Status Classification: Classifies directories as DATA CONSISTENT, DATA INCONSISTENT (AUXILIARY FILES), or DATA INCONSISTENT (MISSING/EXTRA)
 - Visual Analytics: Includes pie charts and color-coded status indicators in PDF reports
 
 Requirements
